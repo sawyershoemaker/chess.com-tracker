@@ -57,13 +57,15 @@ A GitHub Actions–powered project that monitors your Chess.com games and league
 
 2. **Repository Structure:**  
    Your repository should look like this:
-   ```plaintext
+`plaintext
 .
 ├── chess_tracker.py
 ├── last_game.json       # (This file will be auto-created if not present)
 └── .github
     └── workflows
         └── chess-tracker.yml
+```
+
 
 4. **Set Up Secrets:**  
 In your GitHub repository settings, navigate to **Settings > Secrets and variables > Actions** and add the following secrets:
