@@ -55,24 +55,12 @@ A GitHub Actions–powered project that monitors your Chess.com games and league
    - `chess_tracker.py` – The main Python script.
    - `.github/workflows/chess-tracker.yml` – The GitHub Actions workflow file.
 
-2. **Repository Structure:**  
-   Your repository should look like this:
-`plaintext
-.
-├── chess_tracker.py
-├── last_game.json       # (This file will be auto-created if not present)
-└── .github
-    └── workflows
-        └── chess-tracker.yml
-`
-
-
-4. **Set Up Secrets:**  
+2. **Set Up Secrets:**  
 In your GitHub repository settings, navigate to **Settings > Secrets and variables > Actions** and add the following secrets:
 - **WEBHOOK_URL:** The Discord webhook URL where notifications will be sent.
 - **TOKEN:** A personal access token with repo write access.
 
-4. **Customize (Optional):**  
+3. **Customize (Optional):**  
 - **Emoji Mapping:**  
   Update the `EMOJI_MAP` dictionary if your custom Discord emoji IDs or names change.
 - **Time Zone:**  
