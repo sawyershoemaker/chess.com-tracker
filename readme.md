@@ -64,7 +64,7 @@ A GitHub Actions–powered project that monitors your Chess.com games and league
 └── .github
     └── workflows
         └── chess-tracker.yml
-```
+`
 
 
 4. **Set Up Secrets:**  
