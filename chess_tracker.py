@@ -6,12 +6,12 @@ import time
 
 # Replace with your Chess.com username to track.
 CHESS_USERNAME = "inseem"
-ARCHIVES_URL = "https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
+ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
 # Advancement thresholds based on trophy (league) points:
-# For example, a player in wood needs at least 20 points to advance,
-# stone: 15, bronze: 10, silver: 5, crystal: 3, elite: 3, champion: 1, legend: no advancement.
+# wood: top 20 advance, stone: top 15, bronze: top 10, silver: top 5,
+# crystal: top 3, elite: top 3, champion: top 1, legend: highest league, no advancement.
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -20,7 +20,7 @@ ADVANCEMENT_THRESHOLDS = {
     "crystal": 3,
     "elite": 3,
     "champion": 1,
-    "legend": None  # No advancement applicable.
+    "legend": None
 }
 
 # Mapping from league codes to your Discord custom emojis.
@@ -35,17 +35,19 @@ EMOJI_MAP = {
     "bronze": "<:bronze:1342938852175908974>"
 }
 
-# Set a User-Agent header to mimic a real browser request.
+# Updated headers to mimic a real browser request.
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/115.0.0.0 Safari/537.36"
+                  "Chrome/115.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Referer": "https://www.chess.com/"
 }
 
 def load_last_game_data():
     """
     Load the persistent data from file.
-    Expected data: a dict with keys such as:
+    Expected data: a dict with keys:
       - "last_game_url"
       - "last_rating"
       - "alert_info": { "league_endTime": <int>, "alert_sent": <bool> }
@@ -110,6 +112,9 @@ def format_time_control(tc):
 def fetch_latest_game():
     """Fetch the latest game from Chess.com archives."""
     archives_resp = requests.get(ARCHIVES_URL, headers=HEADERS)
+    if archives_resp.status_code == 410:
+        print("No archives available (410 Gone).")
+        return None
     if archives_resp.status_code != 200:
         print(f"Error fetching archives. Status code: {archives_resp.status_code}")
         print("Response:", archives_resp.text)
@@ -266,7 +271,7 @@ def commit_last_game(game_url):
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
 
-        token = os.environ.get("GITHUB_TOKEN")
+        token = os.environ.get("TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
