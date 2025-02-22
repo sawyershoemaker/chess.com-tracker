@@ -16,27 +16,41 @@ HEADERS = {
 }
 
 
-def load_last_game_data():
-    """
-    Load the last recorded game data from file.
-    Expected data: {"last_game_url": ..., "last_rating": ...}
-    """
+def load_last_game_url():
+    """Load the last recorded game URL from file."""
     try:
         with open(LAST_GAME_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            return data.get("last_game_url")
     except FileNotFoundError:
-        return {}
+        return None
 
 
-def save_last_game_data(last_game_url, last_rating):
-    """Save the latest game URL and rating to file."""
+def save_last_game_url(game_url):
+    """Save the latest game URL to file."""
     with open(LAST_GAME_FILE, "w") as f:
-        json.dump({"last_game_url": last_game_url, "last_rating": last_rating}, f)
+        json.dump({"last_game_url": game_url}, f)
+
+
+def get_profile_avatar():
+    """Fetch the user's profile to obtain their avatar URL."""
+    profile_url = f"https://api.chess.com/pub/player/{CHESS_USERNAME}"
+    try:
+        resp = requests.get(profile_url, headers=HEADERS)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("avatar", "")
+        else:
+            print("Error fetching profile:", resp.status_code)
+    except Exception as e:
+        print("Exception fetching profile:", e)
+    return ""
 
 
 def format_time_control(tc):
     """
-    Convert a raw time control string (e.g. "600+5") into a human-readable format.
+    Convert a raw time control string (e.g. "600+5") into the format "10 | 5"
+    where 10 is the main time in minutes and 5 is the increment.
     """
     if isinstance(tc, str):
         if tc.lower() == "unlimited":
@@ -47,16 +61,14 @@ def format_time_control(tc):
                 main_time = int(main_time)
                 increment = int(increment)
                 minutes = main_time // 60
-                seconds = main_time % 60
-                return f"{minutes}m {seconds}s + {increment}s increment"
+                return f"{minutes} | {increment}"
             except ValueError:
                 return tc
         else:
             try:
                 main_time = int(tc)
                 minutes = main_time // 60
-                seconds = main_time % 60
-                return f"{minutes}m {seconds}s"
+                return f"{minutes} | 0"
             except ValueError:
                 return tc
     return tc
@@ -64,7 +76,6 @@ def format_time_control(tc):
 
 def fetch_latest_game():
     """Fetch the latest game from Chess.com archives."""
-    # Fetch list of archives.
     archives_resp = requests.get(ARCHIVES_URL, headers=HEADERS)
     if archives_resp.status_code != 200:
         print(f"Error fetching archives. Status code: {archives_resp.status_code}")
@@ -76,7 +87,6 @@ def fetch_latest_game():
         print("No archives available.")
         return None
 
-    # Pick the latest archive (last element).
     latest_archive_url = archives[-1]
     archive_resp = requests.get(latest_archive_url, headers=HEADERS)
     if archive_resp.status_code != 200:
@@ -89,29 +99,29 @@ def fetch_latest_game():
         print("No games found in the latest archive.")
         return None
 
-    # Assumes games are in chronological order.
+    # Assumes games are in chronological order; take the last game.
     return games[-1]
 
 
 def determine_game_details(game):
     """
-    Determine the opponent, result, game URL, formatted time control, and current rating
-    from the game object.
+    Determine opponent, result, game URL, formatted time control, and rating change.
+    Uses the built-in 'rating_change' field from the relevant side.
     """
     opponent = "Unknown"
-    result = "Draw"  # Default.
-    current_rating = None
+    result = "Draw"  # Default result.
+    rating_change = 0
 
     if game["white"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["black"]["username"]
-        current_rating = game["white"].get("rating")
+        rating_change = game["white"].get("rating_change", 0)
         if game["white"]["result"] == "win":
             result = "Win"
         elif game["black"]["result"] == "win":
             result = "Loss"
     elif game["black"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["white"]["username"]
-        current_rating = game["black"].get("rating")
+        rating_change = game["black"].get("rating_change", 0)
         if game["black"]["result"] == "win":
             result = "Win"
         elif game["white"]["result"] == "win":
@@ -120,20 +130,21 @@ def determine_game_details(game):
     raw_time_control = game.get("time_control", "Unknown")
     time_control_formatted = format_time_control(raw_time_control)
     game_url = game.get("url", "No link available")
-    return opponent, result, game_url, time_control_formatted, current_rating
+    return opponent, result, game_url, time_control_formatted, rating_change
 
 
-def send_discord_webhook(opponent, result, game_url, time_control, rating_change):
+def send_discord_webhook(opponent, game_url, time_control, rating_change, result):
     """
     Send a Discord webhook message using an embed.
-    The embed color is green for wins, red for losses, and gray for draws.
+    The embed's side color is green for wins, red for losses, and gray for draws.
+    The embed includes the tracked user's profile picture.
     """
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WEBHOOK_URL is not set in environment variables.")
         return
 
-    # Set color based on game result.
+    # Determine embed color.
     if result == "Win":
         color = 65280       # Green.
     elif result == "Loss":
@@ -141,13 +152,17 @@ def send_discord_webhook(opponent, result, game_url, time_control, rating_change
     else:
         color = 8421504     # Gray.
 
+    avatar_url = get_profile_avatar()
     embed = {
-        "title": f"{CHESS_USERNAME} played a game!",
+        "author": {
+            "name": CHESS_USERNAME,
+            "icon_url": avatar_url
+        },
+        "title": "New game played!",
         "url": game_url,
         "color": color,
         "fields": [
             {"name": "Opponent", "value": opponent, "inline": True},
-            {"name": "Result", "value": result, "inline": True},
             {"name": "Time Control", "value": time_control, "inline": True},
             {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
         ]
@@ -168,10 +183,9 @@ def commit_last_game(game_url):
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
 
-        # If GITHUB_TOKEN is available, update the remote URL for authenticated push.
+        # Use GITHUB_TOKEN for push authentication if available.
         token = os.environ.get("GITHUB_TOKEN")
         if token:
-            # Adjust the remote URL below to match your repository.
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
 
@@ -184,10 +198,7 @@ def commit_last_game(game_url):
 
 
 def main():
-    last_data = load_last_game_data()  # Contains keys: last_game_url and last_rating.
-    last_game_url = last_data.get("last_game_url")
-    last_rating = last_data.get("last_rating")
-
+    last_game_url = load_last_game_url()
     latest_game = fetch_latest_game()
     if not latest_game:
         return
@@ -197,19 +208,9 @@ def main():
         print("No new game detected.")
         return
 
-    opponent, result, game_url, time_control_formatted, current_rating = determine_game_details(latest_game)
-    if current_rating is None:
-        print("Current rating not found. Cannot compute rating change.")
-        current_rating = 0
-
-    # Compute rating change using stored last rating.
-    if last_rating is not None:
-        rating_change = current_rating - last_rating
-    else:
-        rating_change = 0
-
-    send_discord_webhook(opponent, result, game_url, time_control_formatted, rating_change)
-    save_last_game_data(current_game_url, current_rating)
+    opponent, result, game_url, time_control_formatted, rating_change = determine_game_details(latest_game)
+    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result)
+    save_last_game_url(current_game_url)
     commit_last_game(current_game_url)
 
 
