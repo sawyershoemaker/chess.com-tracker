@@ -9,17 +9,18 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds (example values; adjust as needed)
+# Advancement thresholds based on trophy (league) points:
+# For example, a player in wood needs at least 20 points to advance,
+# stone: 15, bronze: 10, silver: 5, crystal: 3, elite: 3, champion: 1, legend: no advancement.
 ADVANCEMENT_THRESHOLDS = {
-    "bronze": 30,
-    "silver": 50,
     "wood": 20,
-    "stone": 25,
-    # Add additional thresholds for other leagues if needed.
-    "legend": 0,
-    "elite": 0,
-    "crystal": 0,
-    "champion": 0
+    "stone": 15,
+    "bronze": 10,
+    "silver": 5,
+    "crystal": 3,
+    "elite": 3,
+    "champion": 1,
+    "legend": None  # No advancement applicable.
 }
 
 # Mapping from league codes to your Discord custom emojis.
@@ -43,8 +44,11 @@ HEADERS = {
 
 def load_last_game_data():
     """
-    Load the last recorded game data from file.
-    Expected data: {"last_game_url": ..., "last_rating": ...}
+    Load the persistent data from file.
+    Expected data: a dict with keys such as:
+      - "last_game_url"
+      - "last_rating"
+      - "alert_info": { "league_endTime": <int>, "alert_sent": <bool> }
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
@@ -58,10 +62,10 @@ def load_last_game_data():
         print("Warning: last_game.json contains invalid JSON. Resetting data.")
         return {}
 
-def save_last_game_data(last_game_url, last_rating):
-    """Save the latest game URL and rating to file."""
+def save_last_game_data(data):
+    """Save the persistent data dictionary to file."""
     with open(LAST_GAME_FILE, "w") as f:
-        json.dump({"last_game_url": last_game_url, "last_rating": last_rating}, f)
+        json.dump(data, f)
 
 def get_profile_avatar():
     """Fetch the user's profile to obtain their avatar URL."""
@@ -167,8 +171,8 @@ def fetch_league_info():
     """
     Fetch the current league information for the user.
     Expected data includes:
-      - division: contains "endTime" and nested "league" details
-      - stats: contains current ranking ("ranking") and points ("trophyCount")
+      - "division": contains "endTime" and nested "league" details
+      - "stats": contains current ranking ("ranking") and points ("trophyCount")
     """
     url = f"https://www.chess.com/callback/leagues/user-league/search/{CHESS_USERNAME}"
     try:
@@ -183,13 +187,13 @@ def fetch_league_info():
         print("Exception fetching league info:", e)
     return None
 
-def send_discord_webhook(opponent, game_url, time_control, rating_change, result):
+def send_discord_webhook(opponent, game_url, time_control, rating_change, result, league_info=None, add_alert=False):
     """
     Send a Discord webhook message using an embed.
       - The embed's side color is green for wins, red for losses, and gray for draws.
       - The embed includes the tracked user's profile picture.
       - League information is appended: league name (with emoji), place, and points.
-      - If less than 1 day remains in the current league, a special notice pings <@774816976756539422>.
+      - If add_alert is True, a special notice is added for the league deadline.
     """
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
@@ -220,8 +224,6 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         ]
     }
 
-    # Fetch and integrate league info.
-    league_info = fetch_league_info()
     if league_info is not None:
         division = league_info.get("division", {})
         league_data = division.get("league", {})
@@ -235,18 +237,15 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         embed["fields"].append({"name": "Place", "value": f"#{league_place}", "inline": True})
         embed["fields"].append({"name": "Points", "value": str(league_points), "inline": True})
 
-        # Check league deadline.
-        current_time = int(time.time())
-        end_time = division.get("endTime", 0)
-        time_left = end_time - current_time
-        advancement_threshold = ADVANCEMENT_THRESHOLDS.get(league_code, None)
-        if advancement_threshold is not None and isinstance(league_points, (int, float)):
-            points_needed = advancement_threshold - league_points
-            if points_needed < 0:
-                points_needed = 0
-        else:
-            points_needed = "N/A"
-        if time_left < 86400:
+        if add_alert:
+            # Calculate points needed if applicable.
+            threshold = ADVANCEMENT_THRESHOLDS.get(league_code, None)
+            if threshold is not None and isinstance(league_points, (int, float)):
+                points_needed = threshold - league_points
+                if points_needed < 0:
+                    points_needed = 0
+            else:
+                points_needed = "N/A"
             embed["fields"].append({
                 "name": "League Deadline",
                 "value": f"<@774816976756539422> Only 1 day left! You're at #{league_place}. You need {points_needed} more points to advance.",
@@ -280,9 +279,11 @@ def commit_last_game(game_url):
         print("Git command failed:", e)
 
 def main():
-    last_data = load_last_game_data()  # Expects keys: last_game_url, last_rating.
-    last_game_url = last_data.get("last_game_url")
-    last_rating = last_data.get("last_rating", None)
+    # Load persistent data.
+    data = load_last_game_data()  # Expects keys: last_game_url, last_rating, and optionally alert_info.
+    last_game_url = data.get("last_game_url")
+    last_rating = data.get("last_rating", None)
+    alert_info = data.get("alert_info", {})  # Contains "league_endTime" and "alert_sent".
 
     latest_game = fetch_latest_game()
     if not latest_game:
@@ -302,8 +303,32 @@ def main():
     else:
         rating_change = 0
 
-    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result)
-    save_last_game_data(current_game_url, current_rating)
+    # Fetch league info.
+    league_info = fetch_league_info()
+    add_alert = False
+    if league_info is not None:
+        division = league_info.get("division", {})
+        current_end_time = division.get("endTime", 0)
+        current_time = int(time.time())
+        time_left = current_end_time - current_time
+
+        # Reset alert info if the league period has changed.
+        if alert_info.get("league_endTime") != current_end_time:
+            alert_info["league_endTime"] = current_end_time
+            alert_info["alert_sent"] = False
+
+        # If less than one day remains and we haven't sent the alert yet, mark alert.
+        if time_left < 86400 and not alert_info.get("alert_sent", False):
+            add_alert = True
+            alert_info["alert_sent"] = True
+        # Save the updated alert_info back into persistent data.
+        data["alert_info"] = alert_info
+
+    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result, league_info, add_alert)
+    # Update persistent data with latest game info.
+    data["last_game_url"] = current_game_url
+    data["last_rating"] = current_rating
+    save_last_game_data(data)
     commit_last_game(current_game_url)
 
 if __name__ == "__main__":
