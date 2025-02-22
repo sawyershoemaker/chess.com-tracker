@@ -101,16 +101,18 @@ def fetch_latest_game():
 
 def determine_game_details(game):
     """
-    Determine opponent, result, game URL, formatted time control, and current rating.
-    We'll compute the rating change later using the stored last rating.
+    Determine opponent, result, game URL, formatted time control, current rating,
+    and raw rating change (if provided) from the game data.
     """
     opponent = "Unknown"
     result = "Draw"  # Default result.
     current_rating = 0
+    raw_rating_change = None
 
     if game["white"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["black"]["username"]
         current_rating = game["white"].get("rating", 0)
+        raw_rating_change = game["white"].get("rating_change", None)
         if game["white"]["result"] == "win":
             result = "Win"
         elif game["black"]["result"] == "win":
@@ -118,6 +120,7 @@ def determine_game_details(game):
     elif game["black"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["white"]["username"]
         current_rating = game["black"].get("rating", 0)
+        raw_rating_change = game["black"].get("rating_change", None)
         if game["black"]["result"] == "win":
             result = "Win"
         elif game["white"]["result"] == "win":
@@ -126,7 +129,7 @@ def determine_game_details(game):
     raw_time_control = game.get("time_control", "Unknown")
     time_control_formatted = format_time_control(raw_time_control)
     game_url = game.get("url", "No link available")
-    return opponent, result, game_url, time_control_formatted, current_rating
+    return opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change
 
 def send_discord_webhook(opponent, game_url, time_control, rating_change, result):
     """
@@ -203,9 +206,12 @@ def main():
         print("No new game detected.")
         return
 
-    opponent, result, game_url, time_control_formatted, current_rating = determine_game_details(latest_game)
+    opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change = determine_game_details(latest_game)
 
-    if last_rating is not None:
+    # Prefer the rating_change field from the API if available.
+    if raw_rating_change is not None:
+        rating_change = raw_rating_change
+    elif last_rating is not None:
         rating_change = current_rating - last_rating
     else:
         rating_change = 0
