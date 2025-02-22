@@ -64,7 +64,6 @@ A GitHub Actions–powered project that monitors your Chess.com games and league
 └── .github
     └── workflows
         └── chess-tracker.yml
-    ```
 
 4. **Set Up Secrets:**  
 In your GitHub repository settings, navigate to **Settings > Secrets and variables > Actions** and add the following secrets:
