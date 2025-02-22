@@ -13,11 +13,25 @@ LAST_GAME_FILE = "last_game.json"
 ADVANCEMENT_THRESHOLDS = {
     "bronze": 30,
     "silver": 50,
-    "gold": 70,
-    "platinum": 90,
-    "diamond": 110,
     "wood": 20,
-    "stone": 25
+    "stone": 25,
+    # Add additional thresholds for other leagues if needed.
+    "legend": 0,
+    "elite": 0,
+    "crystal": 0,
+    "champion": 0
+}
+
+# Mapping from league codes to your Discord custom emojis.
+EMOJI_MAP = {
+    "wood": "<:wood:1342938885210247330>",
+    "stone": "<:stone:1342938857817247774>",
+    "silver": "<:silver:1342938856986513499>",
+    "legend": "<:legend:1342938856131006494>",
+    "elite": "<:elite:1342938855111786568>",
+    "crystal": "<:crystal:1342938854122061885>",
+    "champion": "<:champion:1342938853069291630>",
+    "bronze": "<:bronze:1342938852175908974>"
 }
 
 # Set a User-Agent header to mimic a real browser request.
@@ -34,8 +48,14 @@ def load_last_game_data():
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
-            return json.load(f)
+            data = f.read().strip()
+            if not data:
+                return {}
+            return json.loads(data)
     except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        print("Warning: last_game.json contains invalid JSON. Resetting data.")
         return {}
 
 def save_last_game_data(last_game_url, last_rating):
@@ -168,7 +188,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     Send a Discord webhook message using an embed.
       - The embed's side color is green for wins, red for losses, and gray for draws.
       - The embed includes the tracked user's profile picture.
-      - League information is appended: league name, place, and points.
+      - League information is appended: league name (with emoji), place, and points.
       - If less than 1 day remains in the current league, a special notice pings <@774816976756539422>.
     """
     webhook_url = os.environ.get("WEBHOOK_URL")
@@ -207,15 +227,13 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         league_data = division.get("league", {})
         league_name = league_data.get("name", "Unknown")
         league_code = league_data.get("code", "").lower()
-        # Use your repo's league image if available.
-        league_image_url = f"https://raw.githubusercontent.com/sawyershoemaker/chess.com-tracker/main/leagues/{league_code}.png"
+        league_emoji = EMOJI_MAP.get(league_code, "")
         stats = league_info.get("stats", {})
         league_place = stats.get("ranking", "N/A")
         league_points = stats.get("trophyCount", "N/A")
-        embed["fields"].append({"name": "League", "value": league_name, "inline": True})
+        embed["fields"].append({"name": "League", "value": f"{league_emoji} {league_name}", "inline": True})
         embed["fields"].append({"name": "Place", "value": f"#{league_place}", "inline": True})
         embed["fields"].append({"name": "Points", "value": str(league_points), "inline": True})
-        embed["thumbnail"] = {"url": league_image_url}
 
         # Check league deadline.
         current_time = int(time.time())
@@ -249,7 +267,7 @@ def commit_last_game(game_url):
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
 
-        token = os.environ.get("TOKEN")
+        token = os.environ.get("GITHUB_TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
