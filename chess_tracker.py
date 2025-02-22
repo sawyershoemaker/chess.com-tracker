@@ -2,11 +2,23 @@ import os
 import json
 import subprocess
 import requests
+import time
 
 # Replace with your Chess.com username to track.
 CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
+
+# Advancement thresholds (example values; adjust as needed)
+ADVANCEMENT_THRESHOLDS = {
+    "bronze": 30,
+    "silver": 50,
+    "gold": 70,
+    "platinum": 90,
+    "diamond": 110,
+    "wood": 20,
+    "stone": 25
+}
 
 # Set a User-Agent header to mimic a real browser request.
 HEADERS = {
@@ -131,11 +143,33 @@ def determine_game_details(game):
     game_url = game.get("url", "No link available")
     return opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change
 
+def fetch_league_info():
+    """
+    Fetch the current league information for the user.
+    Expected data includes:
+      - division: contains "endTime" and nested "league" details
+      - stats: contains current ranking ("ranking") and points ("trophyCount")
+    """
+    url = f"https://www.chess.com/callback/leagues/user-league/search/{CHESS_USERNAME}"
+    try:
+        resp = requests.get(url, headers=HEADERS)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict) and "division" in data and "stats" in data:
+                return data
+        else:
+            print("Error fetching league info:", resp.status_code)
+    except Exception as e:
+        print("Exception fetching league info:", e)
+    return None
+
 def send_discord_webhook(opponent, game_url, time_control, rating_change, result):
     """
     Send a Discord webhook message using an embed.
-    The embed's side color is green for wins, red for losses, and gray for draws.
-    The embed includes the tracked user's profile picture.
+      - The embed's side color is green for wins, red for losses, and gray for draws.
+      - The embed includes the tracked user's profile picture.
+      - League information is appended: league name, place, and points.
+      - If less than 1 day remains in the current league, a special notice pings <@774816976756539422>.
     """
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
@@ -165,10 +199,45 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
         ]
     }
-    payload = {"embeds": [embed]}
-    headers = {"Content-Type": "application/json"}
 
-    resp = requests.post(webhook_url, json=payload, headers=headers)
+    # Fetch and integrate league info.
+    league_info = fetch_league_info()
+    if league_info is not None:
+        division = league_info.get("division", {})
+        league_data = division.get("league", {})
+        league_name = league_data.get("name", "Unknown")
+        league_code = league_data.get("code", "").lower()
+        # Use your repo's league image if available.
+        league_image_url = f"https://raw.githubusercontent.com/sawyershoemaker/chess.com-tracker/main/leagues/{league_code}.png"
+        stats = league_info.get("stats", {})
+        league_place = stats.get("ranking", "N/A")
+        league_points = stats.get("trophyCount", "N/A")
+        embed["fields"].append({"name": "League", "value": league_name, "inline": True})
+        embed["fields"].append({"name": "Place", "value": f"#{league_place}", "inline": True})
+        embed["fields"].append({"name": "Points", "value": str(league_points), "inline": True})
+        embed["thumbnail"] = {"url": league_image_url}
+
+        # Check league deadline.
+        current_time = int(time.time())
+        end_time = division.get("endTime", 0)
+        time_left = end_time - current_time
+        advancement_threshold = ADVANCEMENT_THRESHOLDS.get(league_code, None)
+        if advancement_threshold is not None and isinstance(league_points, (int, float)):
+            points_needed = advancement_threshold - league_points
+            if points_needed < 0:
+                points_needed = 0
+        else:
+            points_needed = "N/A"
+        if time_left < 86400:
+            embed["fields"].append({
+                "name": "League Deadline",
+                "value": f"<@774816976756539422> Only 1 day left! You're at #{league_place}. You need {points_needed} more points to advance.",
+                "inline": False
+            })
+
+    payload = {"embeds": [embed]}
+    headers_payload = {"Content-Type": "application/json"}
+    resp = requests.post(webhook_url, json=payload, headers=headers_payload)
     if resp.status_code in (200, 204):
         print("Webhook sent successfully.")
     else:
@@ -180,7 +249,7 @@ def commit_last_game(game_url):
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
 
-        token = os.environ.get("GITHUB_TOKEN")
+        token = os.environ.get("TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
@@ -207,8 +276,7 @@ def main():
         return
 
     opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change = determine_game_details(latest_game)
-
-    # Prefer the rating_change field from the API if available.
+    # Prefer the API's rating_change if available; otherwise, compute the difference.
     if raw_rating_change is not None:
         rating_change = raw_rating_change
     elif last_rating is not None:
