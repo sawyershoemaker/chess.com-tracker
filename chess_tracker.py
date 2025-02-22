@@ -4,7 +4,7 @@ import subprocess
 import requests
 
 # replace with account username to track
-CHESS_USERNAME = "chess_username"
+CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
@@ -27,9 +27,11 @@ def save_last_game_url(game_url):
 
 def fetch_latest_game():
     """Fetch the latest game from Chess.com archives."""
+    # Fetch the list of archives
     archives_resp = requests.get(ARCHIVES_URL)
     if archives_resp.status_code != 200:
-        print("Error fetching archives.")
+        print(f"Error fetching archives. Status code: {archives_resp.status_code}")
+        print("Response:", archives_resp.text)
         return None
 
     archives = archives_resp.json().get("archives", [])
@@ -37,11 +39,12 @@ def fetch_latest_game():
         print("No archives available.")
         return None
 
-    # pick latest archive
+    # Pick the latest archive (last element)
     latest_archive_url = archives[-1]
     archive_resp = requests.get(latest_archive_url)
     if archive_resp.status_code != 200:
-        print("Error fetching latest archive.")
+        print(f"Error fetching latest archive. Status code: {archive_resp.status_code}")
+        print("Response:", archive_resp.text)
         return None
 
     games = archive_resp.json().get("games", [])
@@ -49,7 +52,7 @@ def fetch_latest_game():
         print("No games found in the latest archive.")
         return None
 
-    # assumes games are in chronological order
+    # Assumes games are in chronological order
     return games[-1]
 
 
@@ -73,7 +76,7 @@ def determine_game_details(game):
             result = "Loss"
         rating_change = game["black"].get("rating_change", 0)
     else:
-        # should not happen if you are tracking your own games.
+        # Should not happen if you are tracking your own games.
         opponent = "Unknown"
 
     time_control = game.get("time_control", "Unknown")
