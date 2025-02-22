@@ -9,9 +9,9 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds based on trophy (league) points:
+# Advancement thresholds (based on trophy/league points):
 # wood: top 20 advance, stone: top 15, bronze: top 10, silver: top 5,
-# crystal: top 3, elite: top 3, champion: top 1, legend: highest league, no advancement.
+# crystal: top 3, elite: top 3, champion: top 1, legend: highest league (no advancement).
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -35,7 +35,7 @@ EMOJI_MAP = {
     "bronze": "<:bronze:1342938852175908974>"
 }
 
-# Updated headers to mimic a real browser request.
+# Headers to mimic a real browser and request JSON.
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -45,13 +45,7 @@ HEADERS = {
 }
 
 def load_last_game_data():
-    """
-    Load the persistent data from file.
-    Expected data: a dict with keys:
-      - "last_game_url"
-      - "last_rating"
-      - "alert_info": { "league_endTime": <int>, "alert_sent": <bool> }
-    """
+    """Load persistent data from file. Expects keys: last_game_url, last_rating, alert_info."""
     try:
         with open(LAST_GAME_FILE, "r") as f:
             data = f.read().strip()
@@ -137,16 +131,25 @@ def fetch_latest_game():
         print("No games found in the latest archive.")
         return None
 
-    # Assumes games are in chronological order; take the last game.
     return games[-1]
+
+def parse_termination(pgn):
+    """Extract the termination reason from the PGN's [Termination ...] tag."""
+    for line in pgn.splitlines():
+        if line.startswith("[Termination "):
+            start = line.find('"')
+            end = line.rfind('"')
+            if start != -1 and end != -1 and end > start:
+                return line[start+1:end]
+    return "Unknown"
 
 def determine_game_details(game):
     """
     Determine opponent, result, game URL, formatted time control, current rating,
-    and raw rating change (if provided) from the game data.
+    raw rating change, and termination method from the game data.
     """
     opponent = "Unknown"
-    result = "Draw"  # Default result.
+    result = "Draw"  # Default.
     current_rating = 0
     raw_rating_change = None
 
@@ -170,7 +173,11 @@ def determine_game_details(game):
     raw_time_control = game.get("time_control", "Unknown")
     time_control_formatted = format_time_control(raw_time_control)
     game_url = game.get("url", "No link available")
-    return opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change
+    termination = "Unknown"
+    pgn = game.get("pgn", "")
+    if pgn:
+        termination = parse_termination(pgn)
+    return opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change, termination
 
 def fetch_league_info():
     """
@@ -192,26 +199,26 @@ def fetch_league_info():
         print("Exception fetching league info:", e)
     return None
 
-def send_discord_webhook(opponent, game_url, time_control, rating_change, result, league_info=None, add_alert=False):
+def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination, league_info=None, add_alert=False):
     """
     Send a Discord webhook message using an embed.
-      - The embed's side color is green for wins, red for losses, and gray for draws.
-      - The embed includes the tracked user's profile picture.
-      - League information is appended: league name (with emoji), place, and points.
-      - If add_alert is True, a special notice is added for the league deadline.
+      - Embed color: green for wins, red for losses, gray for draws.
+      - Includes the tracked user's avatar.
+      - Appends fields for opponent, time control, rating change, and method (termination).
+      - If league info is available, adds league name (with emoji), place, and points.
+      - If add_alert is True, includes a league deadline alert.
     """
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WEBHOOK_URL is not set in environment variables.")
         return
 
-    # Determine embed color.
     if result == "Win":
-        color = 65280       # Green.
+        color = 65280
     elif result == "Loss":
-        color = 16711680    # Red.
+        color = 16711680
     else:
-        color = 8421504     # Gray.
+        color = 8421504
 
     avatar_url = get_profile_avatar()
     embed = {
@@ -226,6 +233,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             {"name": "Opponent", "value": opponent, "inline": True},
             {"name": "Time Control", "value": time_control, "inline": True},
             {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
+            {"name": "Method", "value": termination, "inline": True}
         ]
     }
 
@@ -243,7 +251,6 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         embed["fields"].append({"name": "Points", "value": str(league_points), "inline": True})
 
         if add_alert:
-            # Calculate points needed if applicable.
             threshold = ADVANCEMENT_THRESHOLDS.get(league_code, None)
             if threshold is not None and isinstance(league_points, (int, float)):
                 points_needed = threshold - league_points
@@ -270,12 +277,10 @@ def commit_last_game(game_url):
     try:
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
-
         token = os.environ.get("TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
-
         subprocess.run(["git", "add", LAST_GAME_FILE], check=True)
         subprocess.run(["git", "commit", "-m", "Update last game URL"], check=True)
         subprocess.run(["git", "push"], check=True)
@@ -284,7 +289,6 @@ def commit_last_game(game_url):
         print("Git command failed:", e)
 
 def main():
-    # Load persistent data.
     data = load_last_game_data()  # Expects keys: last_game_url, last_rating, and optionally alert_info.
     last_game_url = data.get("last_game_url")
     last_rating = data.get("last_rating", None)
@@ -299,8 +303,7 @@ def main():
         print("No new game detected.")
         return
 
-    opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change = determine_game_details(latest_game)
-    # Prefer the API's rating_change if available; otherwise, compute the difference.
+    opponent, result, game_url, time_control_formatted, current_rating, raw_rating_change, termination = determine_game_details(latest_game)
     if raw_rating_change is not None:
         rating_change = raw_rating_change
     elif last_rating is not None:
@@ -308,7 +311,6 @@ def main():
     else:
         rating_change = 0
 
-    # Fetch league info.
     league_info = fetch_league_info()
     add_alert = False
     if league_info is not None:
@@ -316,21 +318,15 @@ def main():
         current_end_time = division.get("endTime", 0)
         current_time = int(time.time())
         time_left = current_end_time - current_time
-
-        # Reset alert info if the league period has changed.
         if alert_info.get("league_endTime") != current_end_time:
             alert_info["league_endTime"] = current_end_time
             alert_info["alert_sent"] = False
-
-        # If less than one day remains and we haven't sent the alert yet, mark alert.
         if time_left < 86400 and not alert_info.get("alert_sent", False):
             add_alert = True
             alert_info["alert_sent"] = True
-        # Save the updated alert_info back into persistent data.
         data["alert_info"] = alert_info
 
-    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result, league_info, add_alert)
-    # Update persistent data with latest game info.
+    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result, termination, league_info, add_alert)
     data["last_game_url"] = current_game_url
     data["last_rating"] = current_rating
     save_last_game_data(data)

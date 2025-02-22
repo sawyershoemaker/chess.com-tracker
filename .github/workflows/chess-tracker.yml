@@ -5,28 +5,23 @@ permissions:
 
 on:
   schedule:
-    # Runs every minute (note: scheduled workflows may not run exactly on time)
     - cron: "*/1 * * * *"
   workflow_dispatch:
 
 jobs:
   track-game:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
-
       - name: Install dependencies
         run: pip install requests
-
       - name: Run Chess Tracker Script
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN: ${{ secrets.TOKEN }}
         run: python chess_tracker.py
