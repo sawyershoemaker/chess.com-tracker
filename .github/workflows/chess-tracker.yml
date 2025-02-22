@@ -2,7 +2,7 @@ name: Chess Tracker
 
 on:
   schedule:
-    # Runs ~ every minute
+    # Runs every minute (scheduled workflows may not run exactly on time)
     - cron: "*/1 * * * *"
   workflow_dispatch:
 

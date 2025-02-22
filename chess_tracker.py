@@ -15,22 +15,21 @@ HEADERS = {
                   "Chrome/115.0.0.0 Safari/537.36"
 }
 
-
-def load_last_game_url():
-    """Load the last recorded game URL from file."""
+def load_last_game_data():
+    """
+    Load the last recorded game data from file.
+    Expected data: {"last_game_url": ..., "last_rating": ...}
+    """
     try:
         with open(LAST_GAME_FILE, "r") as f:
-            data = json.load(f)
-            return data.get("last_game_url")
+            return json.load(f)
     except FileNotFoundError:
-        return None
+        return {}
 
-
-def save_last_game_url(game_url):
-    """Save the latest game URL to file."""
+def save_last_game_data(last_game_url, last_rating):
+    """Save the latest game URL and rating to file."""
     with open(LAST_GAME_FILE, "w") as f:
-        json.dump({"last_game_url": game_url}, f)
-
+        json.dump({"last_game_url": last_game_url, "last_rating": last_rating}, f)
 
 def get_profile_avatar():
     """Fetch the user's profile to obtain their avatar URL."""
@@ -45,7 +44,6 @@ def get_profile_avatar():
     except Exception as e:
         print("Exception fetching profile:", e)
     return ""
-
 
 def format_time_control(tc):
     """
@@ -72,7 +70,6 @@ def format_time_control(tc):
             except ValueError:
                 return tc
     return tc
-
 
 def fetch_latest_game():
     """Fetch the latest game from Chess.com archives."""
@@ -102,26 +99,25 @@ def fetch_latest_game():
     # Assumes games are in chronological order; take the last game.
     return games[-1]
 
-
 def determine_game_details(game):
     """
-    Determine opponent, result, game URL, formatted time control, and rating change.
-    Uses the built-in 'rating_change' field from the relevant side.
+    Determine opponent, result, game URL, formatted time control, and current rating.
+    We'll compute the rating change later using the stored last rating.
     """
     opponent = "Unknown"
     result = "Draw"  # Default result.
-    rating_change = 0
+    current_rating = 0
 
     if game["white"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["black"]["username"]
-        rating_change = game["white"].get("rating_change", 0)
+        current_rating = game["white"].get("rating", 0)
         if game["white"]["result"] == "win":
             result = "Win"
         elif game["black"]["result"] == "win":
             result = "Loss"
     elif game["black"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["white"]["username"]
-        rating_change = game["black"].get("rating_change", 0)
+        current_rating = game["black"].get("rating", 0)
         if game["black"]["result"] == "win":
             result = "Win"
         elif game["white"]["result"] == "win":
@@ -130,8 +126,7 @@ def determine_game_details(game):
     raw_time_control = game.get("time_control", "Unknown")
     time_control_formatted = format_time_control(raw_time_control)
     game_url = game.get("url", "No link available")
-    return opponent, result, game_url, time_control_formatted, rating_change
-
+    return opponent, result, game_url, time_control_formatted, current_rating
 
 def send_discord_webhook(opponent, game_url, time_control, rating_change, result):
     """
@@ -176,14 +171,12 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     else:
         print(f"Failed to send webhook. Status code: {resp.status_code}")
 
-
 def commit_last_game(game_url):
     """Commit and push the updated last game URL to the repository."""
     try:
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
 
-        # Use GITHUB_TOKEN for push authentication if available.
         token = os.environ.get("GITHUB_TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
@@ -196,9 +189,11 @@ def commit_last_game(game_url):
     except subprocess.CalledProcessError as e:
         print("Git command failed:", e)
 
-
 def main():
-    last_game_url = load_last_game_url()
+    last_data = load_last_game_data()  # Expects keys: last_game_url, last_rating.
+    last_game_url = last_data.get("last_game_url")
+    last_rating = last_data.get("last_rating", None)
+
     latest_game = fetch_latest_game()
     if not latest_game:
         return
@@ -208,11 +203,16 @@ def main():
         print("No new game detected.")
         return
 
-    opponent, result, game_url, time_control_formatted, rating_change = determine_game_details(latest_game)
-    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result)
-    save_last_game_url(current_game_url)
-    commit_last_game(current_game_url)
+    opponent, result, game_url, time_control_formatted, current_rating = determine_game_details(latest_game)
 
+    if last_rating is not None:
+        rating_change = current_rating - last_rating
+    else:
+        rating_change = 0
+
+    send_discord_webhook(opponent, game_url, time_control_formatted, rating_change, result)
+    save_last_game_data(current_game_url, current_rating)
+    commit_last_game(current_game_url)
 
 if __name__ == "__main__":
     main()
