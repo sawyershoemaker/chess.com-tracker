@@ -8,6 +8,13 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
+# Set a User-Agent header to mimic a real browser request
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/115.0.0.0 Safari/537.36"
+}
+
 
 def load_last_game_url():
     """Load the last recorded game URL from file."""
@@ -28,7 +35,7 @@ def save_last_game_url(game_url):
 def fetch_latest_game():
     """Fetch the latest game from Chess.com archives."""
     # Fetch the list of archives
-    archives_resp = requests.get(ARCHIVES_URL)
+    archives_resp = requests.get(ARCHIVES_URL, headers=HEADERS)
     if archives_resp.status_code != 200:
         print(f"Error fetching archives. Status code: {archives_resp.status_code}")
         print("Response:", archives_resp.text)
@@ -41,7 +48,7 @@ def fetch_latest_game():
 
     # Pick the latest archive (last element)
     latest_archive_url = archives[-1]
-    archive_resp = requests.get(latest_archive_url)
+    archive_resp = requests.get(latest_archive_url, headers=HEADERS)
     if archive_resp.status_code != 200:
         print(f"Error fetching latest archive. Status code: {archive_resp.status_code}")
         print("Response:", archive_resp.text)
