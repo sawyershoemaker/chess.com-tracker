@@ -295,11 +295,10 @@ def send_league_webhook(league_info):
             "name": f"{CHESS_USERNAME} League Update",
             "icon_url": get_profile_avatar()
         },
-        "title": "League Information",
         "color": 3447003,
         "fields": [
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
-            {"name": "Your Position", "value": f"#{league_place}", "inline": True},
+            {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
             {"name": "Leaderboard", "value": division_url, "inline": False},
         ]
