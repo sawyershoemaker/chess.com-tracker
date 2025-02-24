@@ -221,10 +221,9 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     else:
         color = 8421504
     avatar_url = get_profile_avatar()
-    # Get rating emoji for the game category if available.
     rating_emoji = RATING_EMOJI_MAP.get(category, "")
-    # Author field: Username (current_rating rating_emoji) (rating_change)
-    author_text = f"{CHESS_USERNAME} ({current_rating} {rating_emoji}) ({rating_change:+})"
+    # Author field: add emoji before username.
+    author_text = f"{rating_emoji} {CHESS_USERNAME} ({current_rating}) ({rating_change:+})"
     embed = {
         "author": {
             "name": author_text,
@@ -235,7 +234,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         "color": color,
         "fields": [
             {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
-            {"name": "Time Control", "value": " " + time_control, "inline": True},  # Indented with an extra space.
+            {"name": "Time Control", "value": "\t" + time_control, "inline": True},
         ]
     }
     if end_time is not None:
@@ -245,7 +244,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             embed["footer"] = {"text": f"Game played: {formatted_time}"}
         except Exception as e:
             print("Error formatting end_time:", e)
-    # League info is not added to per-game webhook.
+    # Removed league info from per-game webhook.
     for attempt in range(3):
         resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if resp.status_code in (200, 204):
