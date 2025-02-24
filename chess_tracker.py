@@ -222,14 +222,17 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         color = 8421504
     avatar_url = get_profile_avatar()
     rating_emoji = RATING_EMOJI_MAP.get(category, "")
-    # Author field: add emoji before username.
-    author_text = f"{rating_emoji} {CHESS_USERNAME} ({current_rating}) ({rating_change:+})"
+    # Instead of placing emoji in the author field (which doesn't render),
+    # we move the rating info to the embed's description.
+    author_text = CHESS_USERNAME
+    description_text = f"({current_rating} {rating_emoji}) ({rating_change:+})"
     embed = {
         "author": {
             "name": author_text,
             "icon_url": avatar_url
         },
         "title": termination,  # Termination method as title (clickable link to game).
+        "description": description_text,
         "url": game_url,
         "color": color,
         "fields": [
@@ -244,7 +247,6 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             embed["footer"] = {"text": f"Game played: {formatted_time}"}
         except Exception as e:
             print("Error formatting end_time:", e)
-    # Removed league info from per-game webhook.
     for attempt in range(3):
         resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if resp.status_code in (200, 204):
@@ -285,7 +287,7 @@ def send_league_webhook(league_info):
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
             {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
-            {"name": "Leaderboard", "value": division_url, "inline": False},
+            {"name": "Leaderboard", "value": f"[Leaderboard]({division_url})", "inline": False},
         ]
     }
     for attempt in range(3):
