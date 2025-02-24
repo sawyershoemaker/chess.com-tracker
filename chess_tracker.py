@@ -35,6 +35,14 @@ EMOJI_MAP = {
     "bronze": "<:bronze:1342938852175908974>"
 }
 
+# Mapping for rating emojis based on game category.
+RATING_EMOJI_MAP = {
+    "rapid": "<:rapid:1343711691367649442>",
+    "bullet": "<:bullet:1343711689182281738>",
+    "daily": "<:daily:1343711689832665193>",
+    "blitz": "<:blitz:1343711687865405531>"
+}
+
 # Headers to mimic a real browser.
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
@@ -213,8 +221,10 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     else:
         color = 8421504
     avatar_url = get_profile_avatar()
-    # The author field now shows "Username (current_rating) (rating_change)".
-    author_text = f"{CHESS_USERNAME} ({current_rating}) ({rating_change:+})"
+    # Get rating emoji for the game category if available.
+    rating_emoji = RATING_EMOJI_MAP.get(category, "")
+    # Author field: Username (current_rating rating_emoji) (rating_change)
+    author_text = f"{CHESS_USERNAME} ({current_rating} {rating_emoji}) ({rating_change:+})"
     embed = {
         "author": {
             "name": author_text,
@@ -225,7 +235,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         "color": color,
         "fields": [
             {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
-            {"name": "Time Control", "value": time_control, "inline": True},
+            {"name": "Time Control", "value": " " + time_control, "inline": True},  # Indented with an extra space.
         ]
     }
     if end_time is not None:
@@ -235,7 +245,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             embed["footer"] = {"text": f"Game played: {formatted_time}"}
         except Exception as e:
             print("Error formatting end_time:", e)
-    # League info is removed from per-game webhook.
+    # League info is not added to per-game webhook.
     for attempt in range(3):
         resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if resp.status_code in (200, 204):
