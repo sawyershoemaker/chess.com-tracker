@@ -42,13 +42,27 @@ HEADERS = {
     "Referer": "https://www.chess.com/"
 }
 
+def categorize_time_control(tc):
+    try:
+        main_time = int(tc.split('+')[0])
+    except:
+        return "unknown"
+    if main_time < 180:
+        return "bullet"
+    elif main_time < 480:
+        return "blitz"
+    elif main_time < 1500:
+        return "rapid"
+    else:
+        return "daily"
+
 def load_last_game_data():
     """Load persistent data from file.
     Expected keys:
       - "processed_games": list of processed game URLs.
       - "last_rating": dict mapping category to last rating.
       - "alert_info": dict with "league_endTime" and "alert_sent".
-    If the file contains invalid format (e.g., a list), return an empty dict.
+    If the file's content is not a dict, return an empty dict.
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
@@ -131,20 +145,6 @@ def parse_termination(pgn):
                 return line[start+1:end]
     return "Unknown"
 
-def categorize_time_control(tc):
-    try:
-        main_time = int(tc.split('+')[0])
-    except:
-        return "unknown"
-    if main_time < 180:
-        return "bullet"
-    elif main_time < 480:
-        return "blitz"
-    elif main_time < 1500:
-        return "rapid"
-    else:
-        return "daily"
-
 def determine_game_details(game):
     """
     Extract game details.
@@ -200,7 +200,8 @@ def fetch_league_info():
         print("Exception fetching league info:", e)
     return None
 
-def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination, end_time, category, current_rating, opponent_rating, league_info=None, add_alert=False):
+def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination,
+                         end_time, category, current_rating, opponent_rating, league_info=None, add_alert=False):
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WEBHOOK_URL is not set in environment variables.")
@@ -212,19 +213,20 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     else:
         color = 8421504
     avatar_url = get_profile_avatar()
+    # Embed title now includes your rating info in one string.
+    title_text = f"{CHESS_USERNAME} ({current_rating} {category.capitalize()}) ({rating_change:+})"
     embed = {
         "author": {
-            "name": f"{CHESS_USERNAME} ({current_rating} {category.capitalize()})",
+            "name": CHESS_USERNAME,
             "icon_url": avatar_url
         },
-        "title": termination,
+        "title": title_text,
         "url": game_url,
         "color": color,
         "fields": [
-            {"name": "Opponent", "value": opponent, "inline": True},
-            {"name": "Opponent Elo", "value": str(opponent_rating), "inline": True},
+            {"name": "Method", "value": termination, "inline": True},
+            {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
             {"name": "Time Control", "value": time_control, "inline": True},
-            {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
         ]
     }
     if end_time is not None:
@@ -294,11 +296,10 @@ def send_league_webhook(league_info):
             "name": f"{CHESS_USERNAME} League Update",
             "icon_url": get_profile_avatar()
         },
-        "title": "League Information",
         "color": 3447003,
         "fields": [
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
-            {"name": "Your Position", "value": f"#{league_place}", "inline": True},
+            {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
             {"name": "Leaderboard", "value": division_url, "inline": False},
         ]
@@ -340,6 +341,7 @@ def main():
     if not games:
         return
     league_info = fetch_league_info()
+    new_game_found = False
     for game in games:
         game_url = game.get("url", "")
         if game_url in processed_games:
@@ -372,11 +374,12 @@ def main():
         send_discord_webhook(opponent, game_url, time_control_formatted, rating_change,
                                result, termination, end_time, category, current_rating, opponent_rating, league_info, add_alert)
         processed_games.append(game_url)
+        new_game_found = True
     data["processed_games"] = processed_games
     data["last_rating"] = last_rating_dict
     save_last_game_data(data)
     commit_last_game(data)
-    if league_info is not None:
+    if new_game_found and league_info is not None:
         send_league_webhook(league_info)
 
 if __name__ == "__main__":
