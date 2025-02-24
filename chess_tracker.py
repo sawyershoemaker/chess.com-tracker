@@ -213,20 +213,19 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     else:
         color = 8421504
     avatar_url = get_profile_avatar()
-    # Embed title now includes your rating info in one string.
-    title_text = f"{CHESS_USERNAME} ({current_rating} {category.capitalize()}) ({rating_change:+})"
+    # Author field shows your name with your current Elo and category.
     embed = {
         "author": {
-            "name": CHESS_USERNAME,
+            "name": f"{CHESS_USERNAME} ({current_rating} {category.capitalize()})",
             "icon_url": avatar_url
         },
-        "title": title_text,
+        "title": termination,  # Title is the termination method; it's clickable linking to the game.
         "url": game_url,
         "color": color,
         "fields": [
-            {"name": "Method", "value": termination, "inline": True},
             {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
             {"name": "Time Control", "value": time_control, "inline": True},
+            {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
         ]
     }
     if end_time is not None:
@@ -296,10 +295,11 @@ def send_league_webhook(league_info):
             "name": f"{CHESS_USERNAME} League Update",
             "icon_url": get_profile_avatar()
         },
+        "title": "League Information",
         "color": 3447003,
         "fields": [
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
-            {"name": "Position", "value": f"#{league_place}", "inline": True},
+            {"name": "Your Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
             {"name": "Leaderboard", "value": division_url, "inline": False},
         ]
@@ -321,7 +321,7 @@ def commit_last_game(data):
     try:
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
-        token = os.environ.get("GITHUB_TOKEN")
+        token = os.environ.get("TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
