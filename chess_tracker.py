@@ -213,19 +213,19 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     else:
         color = 8421504
     avatar_url = get_profile_avatar()
-    # Author field shows your name with your current Elo and category.
+    # The author field now shows "Username (current_rating) (rating_change)".
+    author_text = f"{CHESS_USERNAME} ({current_rating}) ({rating_change:+})"
     embed = {
         "author": {
-            "name": f"{CHESS_USERNAME} ({current_rating} {category.capitalize()})",
+            "name": author_text,
             "icon_url": avatar_url
         },
-        "title": termination,  # Title is the termination method; it's clickable linking to the game.
+        "title": termination,  # Termination method as title (clickable link to game).
         "url": game_url,
         "color": color,
         "fields": [
             {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
             {"name": "Time Control", "value": time_control, "inline": True},
-            {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
         ]
     }
     if end_time is not None:
@@ -235,31 +235,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             embed["footer"] = {"text": f"Game played: {formatted_time}"}
         except Exception as e:
             print("Error formatting end_time:", e)
-    if league_info is not None:
-        division = league_info.get("division", {})
-        league_data = division.get("league", {})
-        league_name = league_data.get("name", "Unknown")
-        league_code = league_data.get("code", "").lower()
-        league_emoji = EMOJI_MAP.get(league_code, "")
-        stats = league_info.get("stats", {})
-        league_place = stats.get("ranking", "N/A")
-        league_points = stats.get("trophyCount", "N/A")
-        embed["fields"].append({"name": "League", "value": f"{league_emoji} {league_name}", "inline": True})
-        embed["fields"].append({"name": "Place", "value": f"#{league_place}", "inline": True})
-        embed["fields"].append({"name": "Points", "value": str(league_points), "inline": True})
-        if add_alert:
-            threshold = ADVANCEMENT_THRESHOLDS.get(league_code, None)
-            if threshold is not None and isinstance(league_points, (int, float)):
-                points_needed = threshold - league_points
-                if points_needed < 0:
-                    points_needed = 0
-            else:
-                points_needed = "N/A"
-            embed["fields"].append({
-                "name": "League Deadline",
-                "value": f"<@774816976756539422> Only 1 day left! You're at #{league_place}. You need {points_needed} more points to advance.",
-                "inline": False
-            })
+    # League info is removed from per-game webhook.
     for attempt in range(3):
         resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if resp.status_code in (200, 204):
