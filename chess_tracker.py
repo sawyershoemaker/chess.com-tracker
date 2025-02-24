@@ -6,14 +6,12 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# Replace with your Chess.com username to track.
+# Replace with your Chess.com username.
 CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds (based on trophy/league points):
-# wood: top 20, stone: top 15, bronze: top 10, silver: top 5,
-# crystal: top 3, elite: top 3, champion: top 1, legend: highest league (no advancement).
+# Advancement thresholds for league points.
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -37,22 +35,33 @@ EMOJI_MAP = {
     "bronze": "<:bronze:1342938852175908974>"
 }
 
-# Headers to mimic a real browser and request JSON.
+# Headers to mimic a real browser.
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/115.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
     "Accept": "application/json",
     "Referer": "https://www.chess.com/"
 }
 
+def categorize_time_control(tc):
+    try:
+        main_time = int(tc.split('+')[0])
+    except:
+        return "unknown"
+    if main_time < 180:
+        return "bullet"
+    elif main_time < 480:
+        return "blitz"
+    elif main_time < 1500:
+        return "rapid"
+    else:
+        return "daily"
+
 def load_last_game_data():
-    """
-    Load persistent data from file.
+    """Load persistent data from file.
     Expected keys:
-      - "processed_games": list of game URLs already processed
-      - "last_rating": rating from the last processed game
-      - "alert_info": { "league_endTime": <int>, "alert_sent": <bool> }
+      - "processed_games": list of processed game URLs.
+      - "last_rating": dict mapping category to last rating.
+      - "alert_info": dict with "league_endTime" and "alert_sent".
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
@@ -67,18 +76,15 @@ def load_last_game_data():
         return {}
 
 def save_last_game_data(data):
-    """Save persistent data to file."""
     with open(LAST_GAME_FILE, "w") as f:
         json.dump(data, f)
 
 def get_profile_avatar():
-    """Fetch the user's profile to obtain their avatar URL."""
     profile_url = f"https://api.chess.com/pub/player/{CHESS_USERNAME}"
     try:
         resp = requests.get(profile_url, headers=HEADERS)
         if resp.status_code == 200:
-            data = resp.json()
-            return data.get("avatar", "")
+            return resp.json().get("avatar", "")
         else:
             print("Error fetching profile:", resp.status_code)
     except Exception as e:
@@ -86,36 +92,28 @@ def get_profile_avatar():
     return ""
 
 def format_time_control(tc):
-    """
-    Convert a raw time control string (e.g. "600+5") into the format "10 | 5"
-    where 10 is the main time (in minutes) and 5 is the increment.
-    """
     if isinstance(tc, str):
         if tc.lower() == "unlimited":
             return "Unlimited"
         if '+' in tc:
-            main_time, increment = tc.split('+', 1)
             try:
+                main_time, increment = tc.split('+', 1)
                 main_time = int(main_time)
                 increment = int(increment)
                 minutes = main_time // 60
                 return f"{minutes} | {increment}"
-            except ValueError:
+            except:
                 return tc
         else:
             try:
                 main_time = int(tc)
                 minutes = main_time // 60
                 return f"{minutes} | 0"
-            except ValueError:
+            except:
                 return tc
     return tc
 
 def fetch_latest_games():
-    """
-    Fetch all games from the latest archive.
-    Returns a list of game objects (assumed to be in chronological order).
-    """
     archives_resp = requests.get(ARCHIVES_URL, headers=HEADERS)
     if archives_resp.status_code == 410:
         print("No archives available (410 Gone).")
@@ -135,10 +133,9 @@ def fetch_latest_games():
         print("Response:", archive_resp.text)
         return []
     games = archive_resp.json().get("games", [])
-    return games  # Assuming games are sorted chronologically
+    return games
 
 def parse_termination(pgn):
-    """Extract the termination reason from the PGN's [Termination "…"] tag."""
     for line in pgn.splitlines():
         if line.startswith("[Termination "):
             start = line.find('"')
@@ -149,20 +146,21 @@ def parse_termination(pgn):
 
 def determine_game_details(game):
     """
-    Extract details from a game object.
+    Extract game details.
     Returns:
       opponent, result, game_url, time_control_formatted, current_rating,
-      raw_rating_change, termination, end_time
+      raw_rating_change, termination, end_time, raw_time_control, opponent_rating
     """
     opponent = "Unknown"
-    result = "Draw"  # Default.
+    result = "Draw"
     current_rating = 0
     raw_rating_change = None
-
+    opponent_rating = "N/A"
     if game["white"]["username"].lower() == CHESS_USERNAME.lower():
         opponent = game["black"]["username"]
         current_rating = game["white"].get("rating", 0)
         raw_rating_change = game["white"].get("rating_change", None)
+        opponent_rating = game["black"].get("rating", "N/A")
         if game["white"]["result"] == "win":
             result = "Win"
         elif game["black"]["result"] == "win":
@@ -171,11 +169,11 @@ def determine_game_details(game):
         opponent = game["white"]["username"]
         current_rating = game["black"].get("rating", 0)
         raw_rating_change = game["black"].get("rating_change", None)
+        opponent_rating = game["white"].get("rating", "N/A")
         if game["black"]["result"] == "win":
             result = "Win"
         elif game["white"]["result"] == "win":
             result = "Loss"
-
     raw_time_control = game.get("time_control", "Unknown")
     time_control_formatted = format_time_control(raw_time_control)
     game_url = game.get("url", "No link available")
@@ -185,15 +183,9 @@ def determine_game_details(game):
         termination = parse_termination(pgn)
     end_time = game.get("end_time", None)
     return (opponent, result, game_url, time_control_formatted,
-            current_rating, raw_rating_change, termination, end_time)
+            current_rating, raw_rating_change, termination, end_time, raw_time_control, opponent_rating)
 
 def fetch_league_info():
-    """
-    Fetch the current league information for the user.
-    Expected data includes:
-      - "division": contains "endTime" and nested "league" details
-      - "stats": contains current ranking ("ranking") and points ("trophyCount")
-    """
     url = f"https://www.chess.com/callback/leagues/user-league/search/{CHESS_USERNAME}"
     try:
         resp = requests.get(url, headers=HEADERS)
@@ -207,45 +199,33 @@ def fetch_league_info():
         print("Exception fetching league info:", e)
     return None
 
-def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination, end_time, league_info=None, add_alert=False):
-    """
-    Send a Discord webhook message using an embed.
-      - The embed's color is green for wins, red for losses, gray for draws.
-      - The embed title is the termination method.
-      - Fields include opponent, time control, and rating change.
-      - If league info is available, it appends league name (with emoji), place, and points.
-      - If add_alert is True, a league deadline notice is added.
-      - A footer is added showing when the game was played (in EST).
-    """
+def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination, end_time, category, current_rating, opponent_rating, league_info=None, add_alert=False):
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WEBHOOK_URL is not set in environment variables.")
         return
-
     if result == "Win":
         color = 65280
     elif result == "Loss":
         color = 16711680
     else:
         color = 8421504
-
     avatar_url = get_profile_avatar()
     embed = {
         "author": {
-            "name": CHESS_USERNAME,
+            "name": f"{CHESS_USERNAME} ({current_rating} {category.capitalize()})",
             "icon_url": avatar_url
         },
-        "title": termination,  # Termination method as title.
+        "title": termination,
         "url": game_url,
         "color": color,
         "fields": [
             {"name": "Opponent", "value": opponent, "inline": True},
+            {"name": "Opponent Elo", "value": str(opponent_rating), "inline": True},
             {"name": "Time Control", "value": time_control, "inline": True},
             {"name": "Rating Change", "value": f"{rating_change:+}", "inline": True},
         ]
     }
-
-    # Add footer with game played time (in EST) if end_time is available.
     if end_time is not None:
         try:
             est_time = datetime.fromtimestamp(end_time, ZoneInfo("America/New_York"))
@@ -253,7 +233,6 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
             embed["footer"] = {"text": f"Game played: {formatted_time}"}
         except Exception as e:
             print("Error formatting end_time:", e)
-
     if league_info is not None:
         division = league_info.get("division", {})
         league_data = division.get("league", {})
@@ -266,7 +245,6 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         embed["fields"].append({"name": "League", "value": f"{league_emoji} {league_name}", "inline": True})
         embed["fields"].append({"name": "Place", "value": f"#{league_place}", "inline": True})
         embed["fields"].append({"name": "Points", "value": str(league_points), "inline": True})
-
         if add_alert:
             threshold = ADVANCEMENT_THRESHOLDS.get(league_code, None)
             if threshold is not None and isinstance(league_points, (int, float)):
@@ -280,62 +258,103 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
                 "value": f"<@774816976756539422> Only 1 day left! You're at #{league_place}. You need {points_needed} more points to advance.",
                 "inline": False
             })
+    for attempt in range(3):
+        resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
+        if resp.status_code in (200, 204):
+            print("Webhook sent successfully.")
+            break
+        elif resp.status_code == 429:
+            print("Rate limited. Retrying in 3 seconds...")
+            time.sleep(3)
+        else:
+            print(f"Failed to send webhook. Status code: {resp.status_code}")
+            break
+    time.sleep(1)
 
-    payload = {"embeds": [embed]}
-    headers_payload = {"Content-Type": "application/json"}
-    resp = requests.post(webhook_url, json=payload, headers=headers_payload)
-    if resp.status_code in (200, 204):
-        print("Webhook sent successfully.")
-    else:
-        print(f"Failed to send webhook. Status code: {resp.status_code}")
+def send_league_webhook(league_info):
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    if not webhook_url:
+        print("WEBHOOK_URL is not set in environment variables.")
+        return
+    if league_info is None:
+        print("No league info available.")
+        return
+    division = league_info.get("division", {})
+    league_data = division.get("league", {})
+    league_name = league_data.get("name", "Unknown")
+    league_code = league_data.get("code", "").lower()
+    league_emoji = EMOJI_MAP.get(league_code, "")
+    stats = league_info.get("stats", {})
+    league_place = stats.get("ranking", "N/A")
+    league_points = stats.get("trophyCount", "N/A")
+    division_url = division.get("divisionUrl", "Not available")
+    embed = {
+        "author": {
+            "name": f"{CHESS_USERNAME} League Update",
+            "icon_url": get_profile_avatar()
+        },
+        "title": "League Information",
+        "color": 3447003,
+        "fields": [
+            {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
+            {"name": "Your Position", "value": f"#{league_place}", "inline": True},
+            {"name": "Points", "value": str(league_points), "inline": True},
+            {"name": "Leaderboard", "value": division_url, "inline": False},
+        ]
+    }
+    for attempt in range(3):
+        resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
+        if resp.status_code in (200, 204):
+            print("League webhook sent successfully.")
+            break
+        elif resp.status_code == 429:
+            print("Rate limited on league webhook. Retrying in 3 seconds...")
+            time.sleep(3)
+        else:
+            print(f"Failed to send league webhook. Status code: {resp.status_code}")
+            break
+    time.sleep(1)
 
-def commit_last_game(processed_data):
-    """Commit and push the updated persistent data to the repository."""
+def commit_last_game(data):
     try:
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
-        token = os.environ.get("TOKEN")
+        token = os.environ.get("GITHUB_TOKEN")
         if token:
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
         subprocess.run(["git", "add", LAST_GAME_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "Update processed games"], check=True)
+        subprocess.run(["git", "commit", "-m", "Update persistent data"], check=True)
         subprocess.run(["git", "push"], check=True)
         print("Committed and pushed updated persistent data.")
     except subprocess.CalledProcessError as e:
         print("Git command failed:", e)
 
 def main():
-    # Load persistent data.
     data = load_last_game_data()
     processed_games = data.get("processed_games", [])
-    last_rating = data.get("last_rating", None)
+    last_rating_dict = data.get("last_rating", {})  # Keyed by category.
     alert_info = data.get("alert_info", {})  # Contains "league_endTime" and "alert_sent".
-
     games = fetch_latest_games()
     if not games:
         return
-
-    # Process each game (assumed in chronological order).
     league_info = fetch_league_info()
     for game in games:
         game_url = game.get("url", "")
         if game_url in processed_games:
-            continue  # Skip already processed games.
-        # Extract game details.
-        (opponent, result, game_url, time_control_formatted,
-         current_rating, raw_rating_change, termination, end_time) = determine_game_details(game)
-        # Determine rating change.
+            continue
+        (opponent, result, game_url, time_control_formatted, current_rating,
+         raw_rating_change, termination, end_time, raw_time_control, opponent_rating) = determine_game_details(game)
+        category = categorize_time_control(raw_time_control)
         if raw_rating_change is not None:
             rating_change = raw_rating_change
-        elif last_rating is not None:
-            rating_change = current_rating - last_rating
         else:
-            rating_change = 0
-        # Update last_rating for subsequent games.
-        last_rating = current_rating
-
-        # Determine whether to add league deadline alert.
+            previous_rating = last_rating_dict.get(category)
+            if previous_rating is not None:
+                rating_change = current_rating - previous_rating
+            else:
+                rating_change = 0
+        last_rating_dict[category] = current_rating
         add_alert = False
         if league_info is not None:
             division = league_info.get("division", {})
@@ -349,17 +368,15 @@ def main():
                 add_alert = True
                 alert_info["alert_sent"] = True
             data["alert_info"] = alert_info
-
-        # Send webhook for this game.
         send_discord_webhook(opponent, game_url, time_control_formatted, rating_change,
-                               result, termination, end_time, league_info, add_alert)
-        # Mark this game as processed.
+                               result, termination, end_time, category, current_rating, opponent_rating, league_info, add_alert)
         processed_games.append(game_url)
-    # Update persistent data.
     data["processed_games"] = processed_games
-    data["last_rating"] = last_rating
+    data["last_rating"] = last_rating_dict
     save_last_game_data(data)
     commit_last_game(data)
+    if league_info is not None:
+        send_league_webhook(league_info)
 
 if __name__ == "__main__":
     main()
