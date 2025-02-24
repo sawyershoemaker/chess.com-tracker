@@ -42,33 +42,20 @@ HEADERS = {
     "Referer": "https://www.chess.com/"
 }
 
-def categorize_time_control(tc):
-    try:
-        main_time = int(tc.split('+')[0])
-    except:
-        return "unknown"
-    if main_time < 180:
-        return "bullet"
-    elif main_time < 480:
-        return "blitz"
-    elif main_time < 1500:
-        return "rapid"
-    else:
-        return "daily"
-
 def load_last_game_data():
     """Load persistent data from file.
     Expected keys:
       - "processed_games": list of processed game URLs.
       - "last_rating": dict mapping category to last rating.
       - "alert_info": dict with "league_endTime" and "alert_sent".
+    If the file contains invalid format (e.g., a list), return an empty dict.
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
-            data = f.read().strip()
-            if not data:
+            data = json.load(f)
+            if not isinstance(data, dict):
                 return {}
-            return json.loads(data)
+            return data
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError:
@@ -143,6 +130,20 @@ def parse_termination(pgn):
             if start != -1 and end != -1 and end > start:
                 return line[start+1:end]
     return "Unknown"
+
+def categorize_time_control(tc):
+    try:
+        main_time = int(tc.split('+')[0])
+    except:
+        return "unknown"
+    if main_time < 180:
+        return "bullet"
+    elif main_time < 480:
+        return "blitz"
+    elif main_time < 1500:
+        return "rapid"
+    else:
+        return "daily"
 
 def determine_game_details(game):
     """
