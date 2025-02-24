@@ -225,7 +225,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     # Instead of placing emoji in the author field (which doesn't render),
     # we move the rating info to the embed's description.
     author_text = CHESS_USERNAME
-    description_text = f"({current_rating} {rating_emoji}) ({rating_change:+})"
+    description_text = f"**({current_rating}{rating_emoji})** ({rating_change:+})"
     embed = {
         "author": {
             "name": author_text,
