@@ -11,7 +11,7 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds for league points.
+# Advancement thresholds for league advancement (top X players advance).
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -50,6 +50,11 @@ HEADERS = {
     "Referer": "https://www.chess.com/"
 }
 
+def extract_game_id(url):
+    """Extract the game ID from the URL (assumes it's the last segment)."""
+    parts = url.rstrip("/").split("/")
+    return parts[-1] if parts else url
+
 def categorize_time_control(tc):
     try:
         main_time = int(tc.split('+')[0])
@@ -67,10 +72,9 @@ def categorize_time_control(tc):
 def load_last_game_data():
     """Load persistent data from file.
     Expected keys:
-      - "processed_games": list of processed game URLs.
+      - "processed_games": list of processed game IDs.
       - "last_rating": dict mapping category to last rating.
       - "alert_info": dict with "league_endTime" and "alert_sent".
-    If the file's content is not a dict, return an empty dict.
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
@@ -222,16 +226,14 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         color = 8421504
     avatar_url = get_profile_avatar()
     rating_emoji = RATING_EMOJI_MAP.get(category, "")
-    # Instead of placing emoji in the author field (which doesn't render),
-    # we move the rating info to the embed's description.
-    author_text = CHESS_USERNAME
-    description_text = f"**({current_rating}{rating_emoji})** ({rating_change:+})"
+    # Move rating info with emoji into the embed's description.
+    description_text = f"({current_rating} {rating_emoji}) ({rating_change:+})"
     embed = {
         "author": {
-            "name": author_text,
+            "name": CHESS_USERNAME,
             "icon_url": avatar_url
         },
-        "title": termination,  # Termination method as title (clickable link to game).
+        "title": termination,
         "description": description_text,
         "url": game_url,
         "color": color,
@@ -276,7 +278,15 @@ def send_league_webhook(league_info):
     stats = league_info.get("stats", {})
     league_place = stats.get("ranking", "N/A")
     league_points = stats.get("trophyCount", "N/A")
-    division_url = division.get("divisionUrl", "Not available")
+    division_url = division.get("divisionUrl")
+    if not division_url:
+        division_url = f"https://www.chess.com/leagues/{league_code}"
+    end_time = division.get("endTime", None)
+    if end_time is not None:
+        end_time_str = f"<t:{end_time}:f> (<t:{end_time}:R>)"
+    else:
+        end_time_str = "Unknown"
+    cutoff = ADVANCEMENT_THRESHOLDS.get(league_code, "N/A")
     embed = {
         "author": {
             "name": f"{CHESS_USERNAME} League Update",
@@ -287,7 +297,9 @@ def send_league_webhook(league_info):
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
             {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
-            {"name": "Leaderboard", "value": f"[Leaderboard]({division_url})", "inline": False},
+            {"name": "League Ends", "value": end_time_str, "inline": False},
+            {"name": "Advancement", "value": f"Cutoff: Top {cutoff} advance.\nTrophies needed to advance: unknown\nTrophies needed for #1: unknown", "inline": False},
+            {"name": "Footer", "value": f"League Code: {league_code.upper()}", "inline": False}
         ]
     }
     for attempt in range(3):
@@ -330,7 +342,8 @@ def main():
     new_game_found = False
     for game in games:
         game_url = game.get("url", "")
-        if game_url in processed_games:
+        game_id = extract_game_id(game_url)
+        if game_id in processed_games:
             continue
         (opponent, result, game_url, time_control_formatted, current_rating,
          raw_rating_change, termination, end_time, raw_time_control, opponent_rating) = determine_game_details(game)
@@ -359,7 +372,7 @@ def main():
             data["alert_info"] = alert_info
         send_discord_webhook(opponent, game_url, time_control_formatted, rating_change,
                                result, termination, end_time, category, current_rating, opponent_rating, league_info, add_alert)
-        processed_games.append(game_url)
+        processed_games.append(game_id)
         new_game_found = True
     data["processed_games"] = processed_games
     data["last_rating"] = last_rating_dict
