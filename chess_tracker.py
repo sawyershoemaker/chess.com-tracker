@@ -11,7 +11,7 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds for league advancement (top X players advance).
+# Advancement thresholds for league advancement (unused now).
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -226,14 +226,14 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
         color = 8421504
     avatar_url = get_profile_avatar()
     rating_emoji = RATING_EMOJI_MAP.get(category, "")
-    # Move rating info with emoji into the embed's description.
-    description_text = f"({current_rating} {rating_emoji}) ({rating_change:+})"
+    # Embed description shows rating info.
+    description_text = f"**({current_rating}{rating_emoji}) ({rating_change:+})**"
     embed = {
         "author": {
             "name": CHESS_USERNAME,
             "icon_url": avatar_url
         },
-        "title": termination,
+        "title": termination,  # Termination method as title (clickable link).
         "description": description_text,
         "url": game_url,
         "color": color,
@@ -286,7 +286,6 @@ def send_league_webhook(league_info):
         end_time_str = f"<t:{end_time}:f> (<t:{end_time}:R>)"
     else:
         end_time_str = "Unknown"
-    cutoff = ADVANCEMENT_THRESHOLDS.get(league_code, "N/A")
     embed = {
         "author": {
             "name": f"{CHESS_USERNAME} League Update",
@@ -298,9 +297,8 @@ def send_league_webhook(league_info):
             {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
             {"name": "League Ends", "value": end_time_str, "inline": False},
-            {"name": "Advancement", "value": f"Cutoff: Top {cutoff} advance.\nTrophies needed to advance: unknown\nTrophies needed for #1: unknown", "inline": False},
-            {"name": "Footer", "value": f"League Code: {league_code.upper()}", "inline": False}
-        ]
+        ],
+        "footer": {"text": division.get("name", "Unknown")}
     }
     for attempt in range(3):
         resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
