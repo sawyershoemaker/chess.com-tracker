@@ -11,7 +11,7 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds for league advancement (unused now).
+# Advancement thresholds for league advancement.
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -244,43 +244,71 @@ def delete_league_message(message_id):
 
 def update_league_webhook(league_info):
     data = load_last_game_data()
+    stored_snapshot = data.get("league_snapshot", {})
+    new_snapshot = get_league_snapshot(league_info)
+    # Determine alert condition.
+    division = league_info.get("division", {})
+    league_data = division.get("league", {})
+    stats = league_info.get("stats", {})
+    league_place = stats.get("ranking", "N/A")
+    league_code = league_data.get("code", "").lower()
+    cutoff = ADVANCEMENT_THRESHOLDS.get(league_code)
+    alert_needed = False
+    try:
+        ranking_int = int(league_place)
+        if cutoff is not None and ranking_int > cutoff:
+            current_time = int(time.time())
+            end_time_val = division.get("endTime", None)
+            if end_time_val is not None and (end_time_val - current_time) < 86400:
+                alert_needed = True
+    except:
+        pass
+
+    # Only update if snapshot has changed or if an alert is needed.
+    if new_snapshot == stored_snapshot and not alert_needed:
+        print("League info unchanged and no alert needed. Not updating league webhook.")
+        return
+
     # Always attempt to delete the old league message if present.
     stored_message_id = data.get("league_message_id")
     if stored_message_id:
         delete_league_message(stored_message_id)
+
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WEBHOOK_URL not set.")
         return
     send_url = webhook_url + "?wait=true"
-    division = league_info.get("division", {})
-    league_data = division.get("league", {})
     league_name = league_data.get("name", "Unknown")
-    league_code = league_data.get("code", "").lower()
     league_emoji = EMOJI_MAP.get(league_code, "")
-    stats = league_info.get("stats", {})
-    league_place = stats.get("ranking", "N/A")
     league_points = stats.get("trophyCount", "N/A")
     division_url = division.get("divisionUrl")
     if not division_url:
         division_url = f"https://www.chess.com/leagues/{league_code}"
-    end_time = division.get("endTime", None)
-    if end_time is not None:
-        end_time_str = f"<t:{end_time}:f> (<t:{end_time}:R>)"
+    end_time_val = division.get("endTime", None)
+    if end_time_val is not None:
+        end_time_str = f"<t:{end_time_val}:f> (<t:{end_time_val}:R>)"
     else:
         end_time_str = "Unknown"
+    fields = [
+        {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
+        {"name": "Position", "value": f"#{stats.get('ranking', 'N/A')}", "inline": True},
+        {"name": "Points", "value": str(league_points), "inline": True},
+        {"name": "League Ends", "value": end_time_str, "inline": False},
+    ]
+    if alert_needed:
+        fields.append({
+            "name": "Alert",
+            "value": f"<@774816976756539422> Only 1 day left! Your ranking is #{league_place}. You need to be in top {cutoff} to advance.",
+            "inline": False
+        })
     embed = {
         "author": {
             "name": f"{CHESS_USERNAME} League Update",
             "icon_url": get_profile_avatar()
         },
         "color": 3447003,
-        "fields": [
-            {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
-            {"name": "Position", "value": f"#{league_place}", "inline": True},
-            {"name": "Points", "value": str(league_points), "inline": True},
-            {"name": "League Ends", "value": end_time_str, "inline": False},
-        ],
+        "fields": fields,
         "footer": {"text": division.get("name", "Unknown")}
     }
     for attempt in range(3):
@@ -288,7 +316,8 @@ def update_league_webhook(league_info):
         if resp.status_code in (200, 204):
             response_json = resp.json()
             new_message_id = response_json.get("id")
-            print("League webhook updated successfully.")
+            print("League webhook updated successfully. New message id:", new_message_id)
+            data["league_snapshot"] = new_snapshot
             data["league_message_id"] = new_message_id
             save_last_game_data(data)
             break
