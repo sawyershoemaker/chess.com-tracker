@@ -21,9 +21,12 @@ A GitHub Actions–powered project that monitors your Chess.com games and league
   Displays current league details with your custom Discord emojis:
   - League name (with emoji)
   - Your place (ranking)
-  - League points  
-  Additionally, even if no new games are detected, the script updates your league information by deleting the previous league update message and sending a new one. The league webhook footer is formatted to show the division code along with the advancement threshold, for example:  
-  `S4EkVNBt3in    |    TOP 5 ADVANCE`  
+  - League points
+
+  Additionally, even if no new games are detected, the script updates your league information by deleting the previous league update message and sending a new one. The league webhook footer is formatted to show the division code along with the advancement threshold, for example:
+  
+  `S4EkVNBt3in    |    TOP 5 ADVANCE`
+  
   (If no advancement is defined, it will display "no advancement").  
   If less than one day remains in the current league period and your ranking is below the threshold, an alert is added (pings a designated user) to indicate that time is running out for advancement.
 
