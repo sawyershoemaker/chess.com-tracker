@@ -370,7 +370,7 @@ def commit_last_game(data):
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
         subprocess.run(["git", "add", LAST_GAME_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "Update persistent data", "--allow-empty"], check=True)
+        subprocess.run(["git", "commit", "-m", "Force update persistent data"], check=True)
         subprocess.run(["git", "push"], check=True)
         print("Committed and pushed updated persistent data.")
     except subprocess.CalledProcessError as e:
@@ -423,8 +423,8 @@ def main():
     data["processed_games"] = processed_games
     data["last_rating"] = last_rating_dict
     save_last_game_data(data)
-    commit_last_game(data)
     update_league_webhook(league_info)
+    commit_last_game(load_last_game_data())
     
 if __name__ == "__main__":
     main()
