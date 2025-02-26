@@ -11,7 +11,7 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds for league advancement (unused in this version).
+# Advancement thresholds for league advancement.
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -277,6 +277,11 @@ def update_league_webhook(league_info):
             "value": f"<@774816976756539422> Only 1 day left! Your ranking is #{league_place}. You need to be in top {cutoff} to advance.",
             "inline": False
         })
+    division_name = division.get("name", "Unknown")
+    if cutoff is None:
+        footer_text = f"{division_name} | no advancement"
+    else:
+        footer_text = f"{division_name} | top {cutoff} advance"
     embed = {
         "author": {
             "name": f"{CHESS_USERNAME} League Update",
@@ -284,7 +289,7 @@ def update_league_webhook(league_info):
         },
         "color": 3447003,
         "fields": fields,
-        "footer": {"text": division.get("name", "Unknown")}
+        "footer": {"text": footer_text}
     }
     for attempt in range(3):
         resp = requests.post(send_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
