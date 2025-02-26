@@ -282,6 +282,7 @@ def update_league_webhook(league_info):
             "name": f"{CHESS_USERNAME} League Update",
             "icon_url": get_profile_avatar()
         },
+        "title": "League Information",
         "color": 3447003,
         "fields": fields,
         "footer": {"text": division.get("name", "Unknown")}
@@ -291,11 +292,12 @@ def update_league_webhook(league_info):
         if resp.status_code in (200, 204):
             try:
                 response_json = resp.json()
-                new_message_id = response_json.get("id", "unknown")
+                new_message_id = response_json.get("id")
+                if not new_message_id:
+                    new_message_id = "0"  # Force a dummy value if not returned.
                 print("League webhook updated successfully. New message id:", new_message_id)
                 data["league_message_id"] = new_message_id
                 data["league_snapshot"] = get_league_snapshot(league_info)
-                # Force a dummy update so changes are detected.
                 data["last_update"] = int(time.time())
                 save_last_game_data(data)
             except Exception as e:
@@ -359,7 +361,6 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     time.sleep(1)
 
 def commit_last_game(data):
-    # Force a dummy update so that changes are detected.
     data["last_update"] = int(time.time())
     save_last_game_data(data)
     try:
@@ -379,8 +380,8 @@ def commit_last_game(data):
 def main():
     data = load_last_game_data()
     processed_games = data.get("processed_games", [])
-    last_rating_dict = data.get("last_rating", {})  # Keyed by category.
-    alert_info = data.get("alert_info", {})  # Contains "league_endTime" and "alert_sent".
+    last_rating_dict = data.get("last_rating", {})
+    alert_info = data.get("alert_info", {})
     games = fetch_latest_games()
     if not games:
         return
