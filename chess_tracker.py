@@ -51,7 +51,6 @@ HEADERS = {
 }
 
 def extract_game_id(url):
-    """Extract the game ID from the URL (assumes it's the last segment)."""
     parts = url.rstrip("/").split("/")
     return parts[-1] if parts else url
 
@@ -70,14 +69,6 @@ def categorize_time_control(tc):
         return "daily"
 
 def load_last_game_data():
-    """Load persistent data from file.
-    Expected keys:
-      - "processed_games": list of processed game IDs.
-      - "last_rating": dict mapping category to last rating.
-      - "alert_info": dict with "league_endTime" and "alert_sent".
-      - "league_snapshot": snapshot dict of previous league info.
-      - "league_message_id": message id of the last league webhook.
-    """
     try:
         with open(LAST_GAME_FILE, "r") as f:
             data = json.load(f)
@@ -161,12 +152,6 @@ def parse_termination(pgn):
     return "Unknown"
 
 def determine_game_details(game):
-    """
-    Extract game details.
-    Returns:
-      opponent, result, game_url, time_control_formatted, current_rating,
-      raw_rating_change, termination, end_time, raw_time_control, opponent_rating
-    """
     opponent = "Unknown"
     result = "Draw"
     current_rating = 0
@@ -245,7 +230,6 @@ def delete_league_message(message_id):
 
 def update_league_webhook(league_info):
     data = load_last_game_data()
-    # Force delete any previous league message.
     stored_message_id = data.get("league_message_id")
     if stored_message_id:
         delete_league_message(stored_message_id)
@@ -270,7 +254,6 @@ def update_league_webhook(league_info):
         end_time_str = f"<t:{end_time}:f> (<t:{end_time}:R>)"
     else:
         end_time_str = "Unknown"
-    # Check alert condition.
     current_time = int(time.time())
     time_left = end_time - current_time if end_time is not None else None
     cutoff = ADVANCEMENT_THRESHOLDS.get(league_code)
@@ -312,6 +295,8 @@ def update_league_webhook(league_info):
                 print("League webhook updated successfully. New message id:", new_message_id)
                 data["league_message_id"] = new_message_id
                 data["league_snapshot"] = get_league_snapshot(league_info)
+                # Force a dummy update so changes are detected.
+                data["last_update"] = int(time.time())
                 save_last_game_data(data)
             except Exception as e:
                 print("Error parsing response JSON:", e)
@@ -374,7 +359,7 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     time.sleep(1)
 
 def commit_last_game(data):
-    # Force a dummy update to ensure file changes.
+    # Force a dummy update so that changes are detected.
     data["last_update"] = int(time.time())
     save_last_game_data(data)
     try:
@@ -385,7 +370,6 @@ def commit_last_game(data):
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
         subprocess.run(["git", "add", LAST_GAME_FILE], check=True)
-        # Force a commit even if there are no changes.
         subprocess.run(["git", "commit", "-m", "Update persistent data", "--allow-empty"], check=True)
         subprocess.run(["git", "push"], check=True)
         print("Committed and pushed updated persistent data.")
