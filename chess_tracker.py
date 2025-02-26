@@ -234,11 +234,13 @@ def delete_league_message(message_id):
     if not webhook_url:
         return
     delete_url = f"{webhook_url}/messages/{message_id}?wait=true"
+    print(f"Attempting to delete message: {delete_url}")
     resp = requests.delete(delete_url, headers={"Content-Type": "application/json"})
     if resp.status_code in (200, 204):
         print("Deleted old league webhook message.")
     else:
         print(f"Failed to delete old league webhook message. Status code: {resp.status_code}")
+        print("Response:", resp.text)
 
 def update_league_webhook(league_info):
     data = load_last_game_data()
