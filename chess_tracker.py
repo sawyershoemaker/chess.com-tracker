@@ -279,9 +279,9 @@ def update_league_webhook(league_info):
         })
     division_name = division.get("name", "Unknown")
     if cutoff is None:
-        footer_text = f"{division_name} | no advancement"
+        footer_text = f"{division_name} **|** **no advancement**"
     else:
-        footer_text = f"{division_name} | top {cutoff} advance"
+        footer_text = f"{division_name} **|** top **{cutoff}** advance"
     embed = {
         "author": {
             "name": f"{CHESS_USERNAME} League Update",
