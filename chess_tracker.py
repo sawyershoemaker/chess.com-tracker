@@ -281,7 +281,7 @@ def update_league_webhook(league_info):
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
             {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
-            {"name": "League Ends", "value": f"<t:{end_time}:f> (<t:{end_time}:R>)" if end_time else "Unknown", "inline": False},
+            {"name": "League Ends", "value": end_time_str, "inline": False},
         ],
         "footer": {"text": new_snapshot.get("division_name", "Unknown")}
     }
@@ -415,8 +415,7 @@ def main():
     data["last_rating"] = last_rating_dict
     save_last_game_data(data)
     commit_last_game(data)
-    if league_info is not None:
-        update_league_webhook(league_info)
-
+    update_league_webhook(league_info)
+    
 if __name__ == "__main__":
     main()
