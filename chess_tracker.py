@@ -75,6 +75,8 @@ def load_last_game_data():
       - "processed_games": list of processed game IDs.
       - "last_rating": dict mapping category to last rating.
       - "alert_info": dict with "league_endTime" and "alert_sent".
+      - "league_snapshot": snapshot dict of previous league info.
+      - "league_message_id": message id of the last league webhook.
     """
     try:
         with open(LAST_GAME_FILE, "r") as f:
@@ -212,64 +214,47 @@ def fetch_league_info():
         print("Exception fetching league info:", e)
     return None
 
-def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination,
-                         end_time, category, current_rating, opponent_rating, league_info=None, add_alert=False):
-    webhook_url = os.environ.get("WEBHOOK_URL")
-    if not webhook_url:
-        print("WEBHOOK_URL is not set in environment variables.")
-        return
-    if result == "Win":
-        color = 65280
-    elif result == "Loss":
-        color = 16711680
-    else:
-        color = 8421504
-    avatar_url = get_profile_avatar()
-    rating_emoji = RATING_EMOJI_MAP.get(category, "")
-    # Embed description shows rating info.
-    description_text = f"**({current_rating}{rating_emoji}) ({rating_change:+})**"
-    embed = {
-        "author": {
-            "name": CHESS_USERNAME,
-            "icon_url": avatar_url
-        },
-        "title": termination,  # Termination method as title (clickable link).
-        "description": description_text,
-        "url": game_url,
-        "color": color,
-        "fields": [
-            {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
-            {"name": "Time Control", "value": "\t" + time_control, "inline": True},
-        ]
+def get_league_snapshot(league_info):
+    if not league_info:
+        return None
+    division = league_info.get("division", {})
+    league_data = division.get("league", {})
+    stats = league_info.get("stats", {})
+    return {
+        "league_code": league_data.get("code", "").lower(),
+        "league_name": league_data.get("name", "Unknown"),
+        "ranking": stats.get("ranking", "N/A"),
+        "points": stats.get("trophyCount", "N/A"),
+        "endTime": division.get("endTime", None),
+        "division_name": division.get("name", "Unknown")
     }
-    if end_time is not None:
-        try:
-            est_time = datetime.fromtimestamp(end_time, ZoneInfo("America/New_York"))
-            formatted_time = est_time.strftime("%Y-%m-%d %I:%M %p EST")
-            embed["footer"] = {"text": f"Game played: {formatted_time}"}
-        except Exception as e:
-            print("Error formatting end_time:", e)
-    for attempt in range(3):
-        resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
-        if resp.status_code in (200, 204):
-            print("Webhook sent successfully.")
-            break
-        elif resp.status_code == 429:
-            print("Rate limited. Retrying in 3 seconds...")
-            time.sleep(3)
-        else:
-            print(f"Failed to send webhook. Status code: {resp.status_code}")
-            break
-    time.sleep(1)
 
-def send_league_webhook(league_info):
+def delete_league_message(message_id):
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
-        print("WEBHOOK_URL is not set in environment variables.")
         return
-    if league_info is None:
-        print("No league info available.")
+    delete_url = f"{webhook_url}/messages/{message_id}?wait=true"
+    resp = requests.delete(delete_url, headers={"Content-Type": "application/json"})
+    if resp.status_code in (200, 204):
+        print("Deleted old league webhook message.")
+    else:
+        print(f"Failed to delete old league webhook message. Status code: {resp.status_code}")
+
+def update_league_webhook(league_info):
+    data = load_last_game_data()
+    stored_snapshot = data.get("league_snapshot", {})
+    stored_message_id = data.get("league_message_id")
+    new_snapshot = get_league_snapshot(league_info)
+    if new_snapshot == stored_snapshot:
+        print("League info unchanged. Not updating league webhook.")
         return
+    if stored_message_id:
+        delete_league_message(stored_message_id)
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    if not webhook_url:
+        print("WEBHOOK_URL not set.")
+        return
+    send_url = webhook_url + "?wait=true"
     division = league_info.get("division", {})
     league_data = division.get("league", {})
     league_name = league_data.get("name", "Unknown")
@@ -296,20 +281,74 @@ def send_league_webhook(league_info):
             {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
             {"name": "Position", "value": f"#{league_place}", "inline": True},
             {"name": "Points", "value": str(league_points), "inline": True},
-            {"name": "League Ends", "value": end_time_str, "inline": False},
+            {"name": "League Ends", "value": f"<t:{end_time}:f> (<t:{end_time}:R>)" if end_time else "Unknown", "inline": False},
         ],
-        "footer": {"text": division.get("name", "Unknown")}
+        "footer": {"text": new_snapshot.get("division_name", "Unknown")}
     }
+    for attempt in range(3):
+        resp = requests.post(send_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
+        if resp.status_code in (200, 204):
+            response_json = resp.json()
+            new_message_id = response_json.get("id")
+            print("League webhook updated successfully.")
+            data["league_snapshot"] = new_snapshot
+            data["league_message_id"] = new_message_id
+            save_last_game_data(data)
+            break
+        elif resp.status_code == 429:
+            print("Rate limited on league webhook update. Retrying in 3 seconds...")
+            time.sleep(3)
+        else:
+            print(f"Failed to update league webhook. Status code: {resp.status_code}")
+            break
+    time.sleep(1)
+
+def send_discord_webhook(opponent, game_url, time_control, rating_change, result, termination,
+                         end_time, category, current_rating, opponent_rating, league_info=None, add_alert=False):
+    webhook_url = os.environ.get("WEBHOOK_URL")
+    if not webhook_url:
+        print("WEBHOOK_URL is not set in environment variables.")
+        return
+    if result == "Win":
+        color = 65280
+    elif result == "Loss":
+        color = 16711680
+    else:
+        color = 8421504
+    avatar_url = get_profile_avatar()
+    rating_emoji = RATING_EMOJI_MAP.get(category, "")
+    description_text = f"**({current_rating}{rating_emoji}) ({rating_change:+})**"
+    embed = {
+        "author": {
+            "name": CHESS_USERNAME,
+            "icon_url": avatar_url
+        },
+        "title": termination,
+        "description": description_text,
+        "url": game_url,
+        "color": color,
+        "fields": [
+            {"name": "Opponent", "value": f"{opponent} ({opponent_rating})", "inline": True},
+            {"name": "Time Control", "value": "\t" + time_control, "inline": True},
+        ]
+    }
+    if end_time is not None:
+        try:
+            est_time = datetime.fromtimestamp(end_time, ZoneInfo("America/New_York"))
+            formatted_time = est_time.strftime("%Y-%m-%d %I:%M %p EST")
+            embed["footer"] = {"text": f"Game played: {formatted_time}"}
+        except Exception as e:
+            print("Error formatting end_time:", e)
     for attempt in range(3):
         resp = requests.post(webhook_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if resp.status_code in (200, 204):
-            print("League webhook sent successfully.")
+            print("Webhook sent successfully.")
             break
         elif resp.status_code == 429:
-            print("Rate limited on league webhook. Retrying in 3 seconds...")
+            print("Rate limited. Retrying in 3 seconds...")
             time.sleep(3)
         else:
-            print(f"Failed to send league webhook. Status code: {resp.status_code}")
+            print(f"Failed to send webhook. Status code: {resp.status_code}")
             break
     time.sleep(1)
 
@@ -376,8 +415,8 @@ def main():
     data["last_rating"] = last_rating_dict
     save_last_game_data(data)
     commit_last_game(data)
-    if new_game_found and league_info is not None:
-        send_league_webhook(league_info)
+    if league_info is not None:
+        update_league_webhook(league_info)
 
 if __name__ == "__main__":
     main()
