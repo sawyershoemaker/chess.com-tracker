@@ -11,7 +11,7 @@ CHESS_USERNAME = "inseem"
 ARCHIVES_URL = f"https://api.chess.com/pub/player/{CHESS_USERNAME}/games/archives"
 LAST_GAME_FILE = "last_game.json"
 
-# Advancement thresholds for league advancement.
+# Advancement thresholds for league advancement (unused in this version).
 ADVANCEMENT_THRESHOLDS = {
     "wood": 20,
     "stone": 15,
@@ -93,6 +93,7 @@ def load_last_game_data():
 def save_last_game_data(data):
     with open(LAST_GAME_FILE, "w") as f:
         json.dump(data, f)
+    print("Persistent data updated:", data)
 
 def get_profile_avatar():
     profile_url = f"https://api.chess.com/pub/player/{CHESS_USERNAME}"
@@ -244,55 +245,46 @@ def delete_league_message(message_id):
 
 def update_league_webhook(league_info):
     data = load_last_game_data()
-    stored_snapshot = data.get("league_snapshot", {})
-    new_snapshot = get_league_snapshot(league_info)
-    # Determine alert condition.
-    division = league_info.get("division", {})
-    league_data = division.get("league", {})
-    stats = league_info.get("stats", {})
-    league_place = stats.get("ranking", "N/A")
-    league_code = league_data.get("code", "").lower()
-    cutoff = ADVANCEMENT_THRESHOLDS.get(league_code)
-    alert_needed = False
-    try:
-        ranking_int = int(league_place)
-        if cutoff is not None and ranking_int > cutoff:
-            current_time = int(time.time())
-            end_time_val = division.get("endTime", None)
-            if end_time_val is not None and (end_time_val - current_time) < 86400:
-                alert_needed = True
-    except:
-        pass
-
-    # Only update if snapshot has changed or if an alert is needed.
-    if new_snapshot == stored_snapshot and not alert_needed:
-        print("League info unchanged and no alert needed. Not updating league webhook.")
-        return
-
-    # Always attempt to delete the old league message if present.
+    # Force delete any previous league message.
     stored_message_id = data.get("league_message_id")
     if stored_message_id:
         delete_league_message(stored_message_id)
-
     webhook_url = os.environ.get("WEBHOOK_URL")
     if not webhook_url:
         print("WEBHOOK_URL not set.")
         return
     send_url = webhook_url + "?wait=true"
+    division = league_info.get("division", {})
+    league_data = division.get("league", {})
     league_name = league_data.get("name", "Unknown")
+    league_code = league_data.get("code", "").lower()
     league_emoji = EMOJI_MAP.get(league_code, "")
+    stats = league_info.get("stats", {})
+    league_place = stats.get("ranking", "N/A")
     league_points = stats.get("trophyCount", "N/A")
     division_url = division.get("divisionUrl")
     if not division_url:
         division_url = f"https://www.chess.com/leagues/{league_code}"
-    end_time_val = division.get("endTime", None)
-    if end_time_val is not None:
-        end_time_str = f"<t:{end_time_val}:f> (<t:{end_time_val}:R>)"
+    end_time = division.get("endTime", None)
+    if end_time is not None:
+        end_time_str = f"<t:{end_time}:f> (<t:{end_time}:R>)"
     else:
         end_time_str = "Unknown"
+    # Check alert condition.
+    current_time = int(time.time())
+    time_left = end_time - current_time if end_time is not None else None
+    cutoff = ADVANCEMENT_THRESHOLDS.get(league_code)
+    alert_needed = False
+    try:
+        ranking_int = int(league_place)
+        if cutoff is not None and ranking_int > cutoff:
+            if end_time is not None and (end_time - current_time) < 86400:
+                alert_needed = True
+    except:
+        pass
     fields = [
         {"name": "League", "value": f"{league_emoji} {league_name}", "inline": True},
-        {"name": "Position", "value": f"#{stats.get('ranking', 'N/A')}", "inline": True},
+        {"name": "Position", "value": f"#{league_place}", "inline": True},
         {"name": "Points", "value": str(league_points), "inline": True},
         {"name": "League Ends", "value": end_time_str, "inline": False},
     ]
@@ -314,12 +306,15 @@ def update_league_webhook(league_info):
     for attempt in range(3):
         resp = requests.post(send_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if resp.status_code in (200, 204):
-            response_json = resp.json()
-            new_message_id = response_json.get("id")
-            print("League webhook updated successfully. New message id:", new_message_id)
-            data["league_snapshot"] = new_snapshot
-            data["league_message_id"] = new_message_id
-            save_last_game_data(data)
+            try:
+                response_json = resp.json()
+                new_message_id = response_json.get("id", "unknown")
+                print("League webhook updated successfully. New message id:", new_message_id)
+                data["league_message_id"] = new_message_id
+                data["league_snapshot"] = get_league_snapshot(league_info)
+                save_last_game_data(data)
+            except Exception as e:
+                print("Error parsing response JSON:", e)
             break
         elif resp.status_code == 429:
             print("Rate limited on league webhook update. Retrying in 3 seconds...")
@@ -379,6 +374,9 @@ def send_discord_webhook(opponent, game_url, time_control, rating_change, result
     time.sleep(1)
 
 def commit_last_game(data):
+    # Force a dummy update to ensure file changes.
+    data["last_update"] = int(time.time())
+    save_last_game_data(data)
     try:
         subprocess.run(["git", "config", "--global", "user.email", "action@github.com"], check=True)
         subprocess.run(["git", "config", "--global", "user.name", "GitHub Action"], check=True)
@@ -387,7 +385,8 @@ def commit_last_game(data):
             remote_url = f"https://x-access-token:{token}@github.com/sawyershoemaker/chess.com-tracker.git"
             subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
         subprocess.run(["git", "add", LAST_GAME_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "Update persistent data"], check=True)
+        # Force a commit even if there are no changes.
+        subprocess.run(["git", "commit", "-m", "Update persistent data", "--allow-empty"], check=True)
         subprocess.run(["git", "push"], check=True)
         print("Committed and pushed updated persistent data.")
     except subprocess.CalledProcessError as e:
