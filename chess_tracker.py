@@ -244,12 +244,8 @@ def delete_league_message(message_id):
 
 def update_league_webhook(league_info):
     data = load_last_game_data()
-    stored_snapshot = data.get("league_snapshot", {})
+    # Always attempt to delete the old league message if present.
     stored_message_id = data.get("league_message_id")
-    new_snapshot = get_league_snapshot(league_info)
-    if new_snapshot == stored_snapshot:
-        print("League info unchanged. Not updating league webhook.")
-        return
     if stored_message_id:
         delete_league_message(stored_message_id)
     webhook_url = os.environ.get("WEBHOOK_URL")
@@ -285,7 +281,7 @@ def update_league_webhook(league_info):
             {"name": "Points", "value": str(league_points), "inline": True},
             {"name": "League Ends", "value": end_time_str, "inline": False},
         ],
-        "footer": {"text": new_snapshot.get("division_name", "Unknown")}
+        "footer": {"text": division.get("name", "Unknown")}
     }
     for attempt in range(3):
         resp = requests.post(send_url, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
@@ -293,7 +289,6 @@ def update_league_webhook(league_info):
             response_json = resp.json()
             new_message_id = response_json.get("id")
             print("League webhook updated successfully.")
-            data["league_snapshot"] = new_snapshot
             data["league_message_id"] = new_message_id
             save_last_game_data(data)
             break
