@@ -282,7 +282,6 @@ def update_league_webhook(league_info):
             "name": f"{CHESS_USERNAME} League Update",
             "icon_url": get_profile_avatar()
         },
-        "title": "League Information",
         "color": 3447003,
         "fields": fields,
         "footer": {"text": division.get("name", "Unknown")}
@@ -294,7 +293,7 @@ def update_league_webhook(league_info):
                 response_json = resp.json()
                 new_message_id = response_json.get("id")
                 if not new_message_id:
-                    new_message_id = "0"  # Force a dummy value if not returned.
+                    new_message_id = "0"
                 print("League webhook updated successfully. New message id:", new_message_id)
                 data["league_message_id"] = new_message_id
                 data["league_snapshot"] = get_league_snapshot(league_info)
